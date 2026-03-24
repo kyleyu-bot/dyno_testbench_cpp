@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /home/dyno-nuc2/gitRepos/dyno_testbench_cpp -not -path */.git/* -not -path */__pycache__/* -not -name *.pyc)",
+      "Bash(python3 -c \":*)",
+      "Bash(cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug)",
+      "Bash(cmake -B /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build -S /home/dyno-nuc2/gitRepos/dyno_testbench_cpp -DCMAKE_BUILD_TYPE=Debug)",
+      "Bash(cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -Wno-dev)",
+      "Bash(cmake --build build --parallel 4)",
+      "Bash(find /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build -name *.a -o -name *.so -o -name *.exe)"
+    ]
+  }
+}

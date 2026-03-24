@@ -10,10 +10,11 @@ Usage: $0
 Run the repo's environment setup scripts in sequence.
 
 This wrapper runs:
-  1. bootstrap_venv_ecat.sh
-  2. enable_ethercat_caps.sh
-  3. tune_realtime.sh
-  4. rt_setup_part2.sh
+  1. tune_realtime.sh
+  2. rt_setup_part2.sh
+
+Note: bootstrap_venv_ecat.sh and enable_ethercat_caps.sh are skipped —
+Python/pysoem is no longer used; C++ binaries run with sudo directly.
 
 It intentionally does not run run_ethercat_python.sh because that script is a
 Python launcher for the repo-local venv, not an environment configuration step.
@@ -43,11 +44,14 @@ run_step() {
     "$@"
 }
 
-run_step "Bootstrapping EtherCAT virtual environment" \
-    "${SCRIPT_DIR}/bootstrap_venv_ecat.sh"
+# Python/pysoem venv no longer needed — C++ stack uses SOEM directly.
+# run_step "Bootstrapping EtherCAT virtual environment" \
+#     "${SCRIPT_DIR}/bootstrap_venv_ecat.sh"
 
-run_step "Applying interpreter capabilities" \
-    sudo "${SCRIPT_DIR}/enable_ethercat_caps.sh"
+# C++ binaries are run with sudo directly — setcap on a Python interpreter
+# is no longer needed.
+# run_step "Applying interpreter capabilities" \
+#     sudo "${SCRIPT_DIR}/enable_ethercat_caps.sh"
 
 run_step "Applying host-level realtime tuning" \
     sudo "${SCRIPT_DIR}/tune_realtime.sh"

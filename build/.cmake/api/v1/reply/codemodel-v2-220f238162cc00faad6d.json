@@ -1,0 +1,314 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						5,
+						6,
+						7,
+						8
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-Debug-f5ebdc15457944623624.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.20"
+					},
+					"projectIndex" : 0,
+					"source" : "."
+				},
+				{
+					"build" : "_deps/soem-build",
+					"childIndexes" : 
+					[
+						2,
+						3,
+						4
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-_deps.soem-build-Debug-f5088a52b5ac753977bf.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "2.8.4"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 1,
+					"source" : "build/_deps/soem-src",
+					"targetIndexes" : 
+					[
+						11
+					]
+				},
+				{
+					"build" : "_deps/soem-build/test/linux/slaveinfo",
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-_deps.soem-build.test.linux.slaveinfo-Debug-f0be6c80920887069908.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "2.8.4"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "build/_deps/soem-src/test/linux/slaveinfo",
+					"targetIndexes" : 
+					[
+						10
+					]
+				},
+				{
+					"build" : "_deps/soem-build/test/linux/eepromtool",
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-_deps.soem-build.test.linux.eepromtool-Debug-acaa887eee044f723358.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "2.8.4"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "build/_deps/soem-src/test/linux/eepromtool",
+					"targetIndexes" : 
+					[
+						2
+					]
+				},
+				{
+					"build" : "_deps/soem-build/test/linux/simple_test",
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-_deps.soem-build.test.linux.simple_test-Debug-fb7577c3b9ca65fe5f2c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "2.8.4"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "build/_deps/soem-src/test/linux/simple_test",
+					"targetIndexes" : 
+					[
+						9
+					]
+				},
+				{
+					"build" : "_deps/nlohmann_json-build",
+					"jsonFile" : "directory-_deps.nlohmann_json-build-Debug-928ed0b98e40f126c75a.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.1"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 2,
+					"source" : "build/_deps/nlohmann_json-src"
+				},
+				{
+					"build" : "src/ethercat_core",
+					"jsonFile" : "directory-src.ethercat_core-Debug-e273895ee01f30f26170.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.20"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "src/ethercat_core",
+					"targetIndexes" : 
+					[
+						7
+					]
+				},
+				{
+					"build" : "src/tools",
+					"jsonFile" : "directory-src.tools-Debug-45cf6c62ebae9991927b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.20"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "src/tools",
+					"targetIndexes" : 
+					[
+						8
+					]
+				},
+				{
+					"build" : "src/tests",
+					"jsonFile" : "directory-src.tests-Debug-115a8c61f2ecd2030e99.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.20"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "src/tests",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						3,
+						4,
+						5,
+						6
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"childIndexes" : 
+					[
+						1,
+						2
+					],
+					"directoryIndexes" : 
+					[
+						0,
+						6,
+						7,
+						8
+					],
+					"name" : "dyno_testbench_cpp",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						1,
+						2,
+						3,
+						4
+					],
+					"name" : "SOEM",
+					"parentIndex" : 0,
+					"targetIndexes" : 
+					[
+						2,
+						9,
+						10,
+						11
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						5
+					],
+					"name" : "nlohmann_json",
+					"parentIndex" : 0
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 8,
+					"id" : "drive_simple_speed_test1::@08b4cb1648a15a99be29",
+					"jsonFile" : "target-drive_simple_speed_test1-Debug-ba12acfb51dab845ee62.json",
+					"name" : "drive_simple_speed_test1",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 8,
+					"id" : "dyno2_integrated_test1::@08b4cb1648a15a99be29",
+					"jsonFile" : "target-dyno2_integrated_test1-Debug-fb7e2fe5a34fb6e20930.json",
+					"name" : "dyno2_integrated_test1",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 3,
+					"id" : "eepromtool::@8ce5bafc6b6b8c301a35",
+					"jsonFile" : "target-eepromtool-Debug-84048bee1024b66ca430.json",
+					"name" : "eepromtool",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 8,
+					"id" : "el2004_output_hold::@08b4cb1648a15a99be29",
+					"jsonFile" : "target-el2004_output_hold-Debug-139cd3b84b41d826ae21.json",
+					"name" : "el2004_output_hold",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 8,
+					"id" : "el5032_data_read::@08b4cb1648a15a99be29",
+					"jsonFile" : "target-el5032_data_read-Debug-849bf6285c44e26cce49.json",
+					"name" : "el5032_data_read",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 8,
+					"id" : "elm3002_data_read::@08b4cb1648a15a99be29",
+					"jsonFile" : "target-elm3002_data_read-Debug-7c349cdf76b7b92847f3.json",
+					"name" : "elm3002_data_read",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 8,
+					"id" : "elm3002_pdo_check::@08b4cb1648a15a99be29",
+					"jsonFile" : "target-elm3002_pdo_check-Debug-ed78e683b3f5270032c7.json",
+					"name" : "elm3002_pdo_check",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 6,
+					"id" : "ethercat_core::@b8a6b883210b4d039bdd",
+					"jsonFile" : "target-ethercat_core-Debug-9e3fce320b5eef026be5.json",
+					"name" : "ethercat_core",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 7,
+					"id" : "scan_soem::@de05559f4338c8534979",
+					"jsonFile" : "target-scan_soem-Debug-318c0ca811fc740e957a.json",
+					"name" : "scan_soem",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 4,
+					"id" : "simple_test::@6c789934dae60a01ec24",
+					"jsonFile" : "target-simple_test-Debug-e95f20ecb7da52b123a3.json",
+					"name" : "simple_test",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "slaveinfo::@8766dd2480ffaee4af22",
+					"jsonFile" : "target-slaveinfo-Debug-9ad2cf7ea243619080fe.json",
+					"name" : "slaveinfo",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "soem::@fecc44ed49ab65313f63",
+					"jsonFile" : "target-soem-Debug-9179011c77411b378977.json",
+					"name" : "soem",
+					"projectIndex" : 1
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build",
+		"source" : "/home/dyno-nuc2/gitRepos/dyno_testbench_cpp"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}

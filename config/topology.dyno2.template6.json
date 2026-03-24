@@ -1,0 +1,105 @@
+{
+  "iface": "enp47s0",
+  "cycle_hz": 1000,
+  "strict_pdo_size": false,
+  "slaves": [
+    {
+      "name": "main_drive",
+      "position": 4,
+      "kind": "volcano",
+      "vendor_id": 668,
+      "product_code": 262344705,
+      "scaling": {
+        "torque_lsb_per_nm": 10.0,
+        "velocity_lsb_per_rad_s": 1000.0,
+        "position_lsb_per_rad": 10000.0
+      },
+      "pdo_mapping": [
+        { "index": 7186, "subindex": 0, "value": 0, "size": 1 },
+
+        { "index": 5632, "subindex": 0, "value": 0, "size": 1 },
+        { "index": 5632, "subindex": 1, "value": 1614807056, "size": 4 },
+        { "index": 5632, "subindex": 2, "value": 1616904200, "size": 4 },
+        { "index": 5632, "subindex": 3, "value": 1618608160, "size": 4 },
+        { "index": 5632, "subindex": 4, "value": 1627324448, "size": 4 },
+        { "index": 5632, "subindex": 5, "value": 539099168, "size": 4 },
+        { "index": 5632, "subindex": 6, "value": 623050784, "size": 4 },
+        { "index": 5632, "subindex": 0, "value": 6, "size": 1 },
+
+        { "index": 5633, "subindex": 0, "value": 0, "size": 1 },
+        { "index": 5633, "subindex": 1, "value": 623312928, "size": 4 },
+        { "index": 5633, "subindex": 2, "value": 623378464, "size": 4 },
+        { "index": 5633, "subindex": 3, "value": 621412384, "size": 4 },
+        { "index": 5633, "subindex": 4, "value": 621477920, "size": 4 },
+        { "index": 5633, "subindex": 5, "value": 621543456, "size": 4 },
+        { "index": 5633, "subindex": 6, "value": 621871136, "size": 4 },
+        { "index": 5633, "subindex": 7, "value": 621936672, "size": 4 },
+        { "index": 5633, "subindex": 8, "value": 622002208, "size": 4 },
+        { "index": 5633, "subindex": 0, "value": 8, "size": 1 },
+
+        { "index": 7186, "subindex": 1, "value": 5632, "size": 2 },
+        { "index": 7186, "subindex": 2, "value": 5633, "size": 2 },
+        { "index": 7186, "subindex": 0, "value": 2, "size": 1 },
+
+        { "index": 7187, "subindex": 0, "value": 0, "size": 1 },
+
+        { "index": 6656, "subindex": 0, "value": 0, "size": 1 },
+        { "index": 6656, "subindex": 1, "value": 1614872592, "size": 4 },
+        { "index": 6656, "subindex": 2, "value": 1616969736, "size": 4 },
+        { "index": 6656, "subindex": 3, "value": 1617166368, "size": 4 },
+        { "index": 6656, "subindex": 4, "value": 543162400, "size": 4 },
+        { "index": 6656, "subindex": 5, "value": 1618411536, "size": 4 },
+        { "index": 6656, "subindex": 6, "value": 543359008, "size": 4 },
+        { "index": 6656, "subindex": 7, "value": 1614741520, "size": 4 },
+        { "index": 6656, "subindex": 0, "value": 7, "size": 1 },
+
+        { "index": 6657, "subindex": 0, "value": 0, "size": 1 },
+        { "index": 6657, "subindex": 1, "value": 1617690656, "size": 4 },
+        { "index": 6657, "subindex": 2, "value": 541720608, "size": 4 },
+        { "index": 6657, "subindex": 3, "value": 544735264, "size": 4 },
+        { "index": 6657, "subindex": 4, "value": 544800800, "size": 4 },
+        { "index": 6657, "subindex": 5, "value": 540737568, "size": 4 },
+        { "index": 6657, "subindex": 6, "value": 540803104, "size": 4 },
+        { "index": 6657, "subindex": 7, "value": 544604192, "size": 4 },
+        { "index": 6657, "subindex": 0, "value": 7, "size": 1 },
+
+        { "index": 6658, "subindex": 0, "value": 0, "size": 1 },
+        { "index": 6658, "subindex": 1, "value": 544342048, "size": 4 },
+        { "index": 6658, "subindex": 2, "value": 544407584, "size": 4 },
+        { "index": 6658, "subindex": 0, "value": 2, "size": 1 },
+
+        { "index": 7187, "subindex": 1, "value": 6656, "size": 2 },
+        { "index": 7187, "subindex": 2, "value": 6657, "size": 2 },
+        { "index": 7187, "subindex": 3, "value": 6658, "size": 2 },
+        { "index": 7187, "subindex": 0, "value": 3, "size": 1 }
+      ]
+    },
+    {
+      "name": "digital_IO",
+      "position": 3,
+      "kind": "EL2004",
+      "vendor_id": 2,
+      "product_code": 131346514,
+      "scaling": {},
+      "pdo_mapping": []
+    },
+    {
+      "name": "encoder_interface",
+      "position": 4,
+      "kind": "EL5032",
+      "vendor_id": 2,
+      "product_code": 329789522,
+      "scaling": {},
+      "pdo_mapping": []
+    },
+    {
+      "name": "analog_input_interface",
+      "position": 1,
+      "kind": "ELM3002",
+      "vendor_id": 2,
+      "product_code": 1344368041,
+      "scaling": {},
+      "pdo_mapping": []
+    }
+  ]
+}

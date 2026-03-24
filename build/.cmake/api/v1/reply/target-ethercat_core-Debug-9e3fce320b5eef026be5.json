@@ -1,0 +1,223 @@
+{
+	"archive" : {},
+	"artifacts" : 
+	[
+		{
+			"path" : "src/ethercat_core/libethercat_core.a"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"target_link_libraries",
+			"target_compile_options",
+			"target_include_directories"
+		],
+		"files" : 
+		[
+			"src/ethercat_core/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 1,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 28,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 37,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 14,
+				"parent" : 0
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-g"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wall"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wextra"
+				},
+				{
+					"fragment" : "-std=c++20"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 4,
+					"path" : "/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/soem"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal/linux"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/oshw/linux"
+				},
+				{
+					"backtrace" : 2,
+					"path" : "/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/nlohmann_json-src/include"
+				}
+			],
+			"language" : "CXX",
+			"languageStandard" : 
+			{
+				"backtraces" : 
+				[
+					2
+				],
+				"standard" : "20"
+			},
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 2,
+			"id" : "soem::@fecc44ed49ab65313f63"
+		}
+	],
+	"id" : "ethercat_core::@b8a6b883210b4d039bdd",
+	"name" : "ethercat_core",
+	"nameOnDisk" : "libethercat_core.a",
+	"paths" : 
+	{
+		"build" : "src/ethercat_core",
+		"source" : "src/ethercat_core"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/master.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/loop.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/devices/beckhoff/el2004/adapter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/devices/beckhoff/el3002/adapter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/devices/beckhoff/el5032/adapter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/devices/motor_drives/Novanta/Everest/adapter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.cpp",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

@@ -1,0 +1,1 @@
+/usr/bin/g++ -g CMakeFiles/elm3002_pdo_check.dir/elm3002_pdo_check.cpp.o -o elm3002_pdo_check  ../ethercat_core/libethercat_core.a ../../_deps/soem-build/libsoem.a -lpthread -lrt 
