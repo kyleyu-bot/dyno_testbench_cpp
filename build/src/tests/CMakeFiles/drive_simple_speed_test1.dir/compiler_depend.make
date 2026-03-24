@@ -282,10 +282,11 @@ src/tests/CMakeFiles/drive_simple_speed_test1.dir/drive_simple_speed_test1.cpp.o
   /usr/include/x86_64-linux-gnu/sys/time.h \
   /usr/include/semaphore.h \
   /usr/include/x86_64-linux-gnu/bits/semaphore.h \
-  ../include/ethercat_core/devices/motor_drives/Novanta/Everest/adapter.hpp \
-  ../include/ethercat_core/devices/motor_drives/Novanta/Everest/data_types.hpp \
+  ../include/ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.hpp \
+  ../include/ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp \
   ../include/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
-  ../include/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp \
+  ../include/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
+  ../include/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
   _deps/soem-src/soem/ethercat.h \
   _deps/soem-src/soem/ethercattype.h \
   _deps/soem-src/osal/osal.h \
@@ -396,10 +397,6 @@ _deps/soem-src/osal/osal.h:
 _deps/soem-src/soem/ethercattype.h:
 
 _deps/soem-src/soem/ethercat.h:
-
-../include/ethercat_core/devices/motor_drives/Novanta/Everest/data_types.hpp:
-
-../include/ethercat_core/devices/motor_drives/Novanta/Everest/adapter.hpp:
 
 /usr/include/x86_64-linux-gnu/sys/time.h:
 
@@ -571,6 +568,8 @@ _deps/soem-src/oshw/linux/nicdrv.h:
 
 /usr/include/c++/11/pstl/pstl_config.h:
 
+../include/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp:
+
 /usr/include/c++/11/bits/allocator.h:
 
 /usr/include/c++/11/type_traits:
@@ -686,8 +685,6 @@ _deps/soem-src/soem/ethercatcoe.h:
 /usr/include/x86_64-linux-gnu/bits/time64.h:
 
 /usr/include/x86_64-linux-gnu/c++/11/bits/c++locale.h:
-
-../include/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp:
 
 /usr/include/x86_64-linux-gnu/bits/xopen_lim.h:
 
@@ -837,9 +834,13 @@ _deps/soem-src/soem/ethercatprint.h:
 
 /usr/include/c++/11/bits/charconv.h:
 
+../include/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp:
+
 /usr/include/c++/11/bits/basic_string.tcc:
 
 /usr/include/c++/11/bits/hashtable.h:
+
+../include/ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.hpp:
 
 /usr/include/c++/11/bits/hashtable_policy.h:
 
@@ -920,6 +921,8 @@ _deps/soem-src/soem/ethercatdc.h:
 /usr/include/c++/11/bits/ios_base.h:
 
 /usr/include/c++/11/bits/locale_classes.h:
+
+../include/ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp:
 
 /usr/include/c++/11/bits/locale_classes.tcc:
 

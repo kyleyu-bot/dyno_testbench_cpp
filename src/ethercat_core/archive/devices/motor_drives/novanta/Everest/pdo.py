@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from struct import Struct
 
 from .data_types import Command, DriveCiA402States, DriveStatus
-from ...drive_bases.ds402.pdo import (
+from .....archive.devices.motor_drives.drive_bases.ds402.pdo import (
     _clamp_i32,
     _controlword_from_command,
     _decode_statusword_bits,

@@ -228,10 +228,9 @@ src/tests/CMakeFiles/drive_simple_speed_test1.dir/drive_simple_speed_test1.cpp.o
  /usr/include/x86_64-linux-gnu/bits/semaphore.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.hpp \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Everest/data_types.hpp \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/soem/ethercat.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/soem/ethercattype.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal/osal.h \

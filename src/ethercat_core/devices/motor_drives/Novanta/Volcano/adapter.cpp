@@ -1,5 +1,5 @@
 #include "ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.hpp"
-#include "ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp"
+#include "ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp"
 
 namespace ethercat_core::novanta::volcano {
 
@@ -8,7 +8,7 @@ std::vector<uint8_t> NovantaVolcanoAdapter::packRxPdo(const std::any& command) {
         return std::vector<uint8_t>(RX_PDO_SIZE, 0);
     }
     const auto& cmd = std::any_cast<const Command&>(command);
-    return everest::packCommand(cmd, last_status_word_, &scaling_);
+    return packCommand(cmd, last_status_word_, &scaling_);
 }
 
 std::any NovantaVolcanoAdapter::unpackTxPdo(
@@ -16,7 +16,7 @@ std::any NovantaVolcanoAdapter::unpackTxPdo(
     uint64_t seq, int64_t stamp_ns,
     int64_t cycle_time_ns, int64_t dc_error_ns)
 {
-    DriveStatus status = everest::unpackStatus(
+    DriveStatus status = unpackStatus(
         data, size, seq, stamp_ns, cycle_time_ns, dc_error_ns, &scaling_
     );
     last_status_word_ = status.status_word;

@@ -477,15 +477,34 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
-    // Clear EL2004 output before exit.
-    if (args.hold_output1) {
-        SystemCommand clear_cmd;
-        clear_cmd.by_slave[args.io_slave] = beckhoff::el2004::Command{};
-        loop.setCommand(clear_cmd);
-        const int wait_ms = std::max(2, 2000 / std::max(cfg.cycle_hz, 1));
-        std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
-        std::printf("EL2004 output 1 cleared.\n");
+    // ── Graceful shutdown ─────────────────────────────────────────────────────
+    // Send enable_drive=false for ~200 ms so the DS402 state machine can walk
+    // back to SWITCH_ON_DISABLED before the bus is torn down.  Without this
+    // the drive's PDO watchdog fires the instant loop.stop() kills cyclic PDO,
+    // landing it in FAULT and requiring a power cycle.
+    std::printf("Disabling drive (graceful shutdown)...\n");
+    {
+        Command disable_cmd;
+        disable_cmd.mode_of_operation      = cmd_mode;
+        disable_cmd.torque_kp              = torque_kp;
+        disable_cmd.torque_loop_max_output = vel_qr;
+        disable_cmd.torque_loop_min_output = vel_is;
+        disable_cmd.velocity_loop_kp       = vel_kp;
+        disable_cmd.velocity_loop_ki       = vel_ki;
+        disable_cmd.velocity_loop_kd       = vel_kd;
+        disable_cmd.position_loop_kp       = pos_kp;
+        disable_cmd.position_loop_ki       = pos_ki;
+        disable_cmd.position_loop_kd       = pos_kd;
+        disable_cmd.enable_drive           = false;
+        disable_cmd.clear_fault            = false;
+
+        SystemCommand sys;
+        sys.by_slave[args.drive_slave]  = disable_cmd;
+        sys.by_slave[args.io_slave]     = beckhoff::el2004::Command{};  // output cleared
+        loop.setCommand(sys);
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
+    std::printf("Drive disabled. Stopping loop.\n");
 
     loop.stop();
     master.close();

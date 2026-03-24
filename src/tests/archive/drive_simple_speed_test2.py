@@ -19,7 +19,7 @@ from ethercat_core.data_types import SystemCommand
 from ethercat_core.loop import EthercatLoop, LoopConfig
 from ethercat_core.master import EthercatMaster, load_topology, resolve_slave_position
 from ethercat_core.devices.base import SdoReadSpec
-from ethercat_core.devices.motor_drives.Novanta.Volcano.data_types import Command, DriveCiA402States, ModeOfOperation
+from ethercat_core.archive.devices.motor_drives.novanta.Volcano.data_types import Command, DriveCiA402States, ModeOfOperation
 
 
 def parse_args() -> argparse.Namespace:

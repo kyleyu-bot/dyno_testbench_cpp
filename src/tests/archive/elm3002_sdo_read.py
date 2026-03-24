@@ -23,8 +23,8 @@ from ethercat_core.master import (
     require_pysoem,
     resolve_slave_position,
 )
-from ethercat_core.devices.beckhoff.el3002.adapter import El3002SlaveAdapter
-from ethercat_core.devices.beckhoff.el3002.data_types import EL3002_TX_PDO_FIELDS, El3002Data
+from ethercat_core.archive.devices.beckhoff.el3002.adapter import El3002SlaveAdapter
+from ethercat_core.archive.devices.beckhoff.el3002.data_types import EL3002_TX_PDO_FIELDS, El3002Data
 
 
 def _parse_cpu_affinity(value: str) -> set[int]:

@@ -17,8 +17,8 @@ if str(SRC_ROOT) not in sys.path:
 
 from ethercat_core.loop import EthercatLoop, LoopConfig
 from ethercat_core.master import EthercatMaster, al_state_name, load_topology, resolve_slave_position
-from ethercat_core.devices.beckhoff.el3002.adapter import El3002SlaveAdapter
-from ethercat_core.devices.beckhoff.el3002.data_types import El3002Data
+from ethercat_core.archive.devices.beckhoff.el3002.adapter import El3002SlaveAdapter
+from ethercat_core.archive.devices.beckhoff.el3002.data_types import El3002Data
 
 
 def _parse_cpu_affinity(value: str) -> set[int]:

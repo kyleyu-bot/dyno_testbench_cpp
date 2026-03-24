@@ -22,7 +22,7 @@ from ethercat_core.master import (
     load_topology,
     resolve_slave_position,
 )
-from ethercat_core.devices.motor_drives.Novanta.Volcano.data_types import DriveStatus
+from ethercat_core.archive.devices.motor_drives.novanta.Volcano.data_types import DriveStatus
 
 MAX_FIELDS = 6
 DEFAULT_FIELDS = [
