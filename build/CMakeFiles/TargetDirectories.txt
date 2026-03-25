@@ -57,7 +57,9 @@
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/elm3002_pdo_check.dir
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/el5032_data_read.dir
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/el2004_output_hold.dir
+/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/drive_simple_speed_test2.dir
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/dyno2_integrated_test1.dir
+/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/dyno2_integrated_test2.dir
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/edit_cache.dir
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/rebuild_cache.dir
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/list_install_components.dir

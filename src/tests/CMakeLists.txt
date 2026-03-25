@@ -41,9 +41,23 @@ target_include_directories(el2004_output_hold PRIVATE ${SOEM_INCLUDES})
 target_link_libraries(el2004_output_hold PRIVATE ethercat_core soem pthread rt)
 target_compile_options(el2004_output_hold PRIVATE -Wall -Wextra)
 
+# ── drive_simple_speed_test2 ──────────────────────────────────────────────────
+
+add_executable(drive_simple_speed_test2 drive_simple_speed_test2.cpp)
+target_include_directories(drive_simple_speed_test2 PRIVATE ${SOEM_INCLUDES})
+target_link_libraries(drive_simple_speed_test2 PRIVATE ethercat_core soem pthread rt)
+target_compile_options(drive_simple_speed_test2 PRIVATE -Wall -Wextra)
+
 # ── dyno2_integrated_test1 ────────────────────────────────────────────────────
 
 add_executable(dyno2_integrated_test1 dyno2_integrated_test1.cpp)
 target_include_directories(dyno2_integrated_test1 PRIVATE ${SOEM_INCLUDES})
 target_link_libraries(dyno2_integrated_test1 PRIVATE ethercat_core soem pthread rt)
 target_compile_options(dyno2_integrated_test1 PRIVATE -Wall -Wextra)
+
+# ── dyno2_integrated_test2 ────────────────────────────────────────────────────
+
+add_executable(dyno2_integrated_test2 dyno2_integrated_test2.cpp)
+target_include_directories(dyno2_integrated_test2 PRIVATE ${SOEM_INCLUDES})
+target_link_libraries(dyno2_integrated_test2 PRIVATE ethercat_core soem pthread rt)
+target_compile_options(dyno2_integrated_test2 PRIVATE -Wall -Wextra)

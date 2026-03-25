@@ -232,6 +232,20 @@ el2004_output_hold/fast:
 .PHONY : el2004_output_hold/fast
 
 # Convenience name for target.
+src/tests/CMakeFiles/drive_simple_speed_test2.dir/rule:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/tests/CMakeFiles/drive_simple_speed_test2.dir/rule
+.PHONY : src/tests/CMakeFiles/drive_simple_speed_test2.dir/rule
+
+# Convenience name for target.
+drive_simple_speed_test2: src/tests/CMakeFiles/drive_simple_speed_test2.dir/rule
+.PHONY : drive_simple_speed_test2
+
+# fast build rule for target.
+drive_simple_speed_test2/fast:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/drive_simple_speed_test2.dir/build.make src/tests/CMakeFiles/drive_simple_speed_test2.dir/build
+.PHONY : drive_simple_speed_test2/fast
+
+# Convenience name for target.
 src/tests/CMakeFiles/dyno2_integrated_test1.dir/rule:
 	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/tests/CMakeFiles/dyno2_integrated_test1.dir/rule
 .PHONY : src/tests/CMakeFiles/dyno2_integrated_test1.dir/rule
@@ -244,6 +258,20 @@ dyno2_integrated_test1: src/tests/CMakeFiles/dyno2_integrated_test1.dir/rule
 dyno2_integrated_test1/fast:
 	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/dyno2_integrated_test1.dir/build.make src/tests/CMakeFiles/dyno2_integrated_test1.dir/build
 .PHONY : dyno2_integrated_test1/fast
+
+# Convenience name for target.
+src/tests/CMakeFiles/dyno2_integrated_test2.dir/rule:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/tests/CMakeFiles/dyno2_integrated_test2.dir/rule
+.PHONY : src/tests/CMakeFiles/dyno2_integrated_test2.dir/rule
+
+# Convenience name for target.
+dyno2_integrated_test2: src/tests/CMakeFiles/dyno2_integrated_test2.dir/rule
+.PHONY : dyno2_integrated_test2
+
+# fast build rule for target.
+dyno2_integrated_test2/fast:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/dyno2_integrated_test2.dir/build.make src/tests/CMakeFiles/dyno2_integrated_test2.dir/build
+.PHONY : dyno2_integrated_test2/fast
 
 drive_simple_speed_test1.o: drive_simple_speed_test1.cpp.o
 .PHONY : drive_simple_speed_test1.o
@@ -269,6 +297,30 @@ drive_simple_speed_test1.cpp.s:
 	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/drive_simple_speed_test1.dir/build.make src/tests/CMakeFiles/drive_simple_speed_test1.dir/drive_simple_speed_test1.cpp.s
 .PHONY : drive_simple_speed_test1.cpp.s
 
+drive_simple_speed_test2.o: drive_simple_speed_test2.cpp.o
+.PHONY : drive_simple_speed_test2.o
+
+# target to build an object file
+drive_simple_speed_test2.cpp.o:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/drive_simple_speed_test2.dir/build.make src/tests/CMakeFiles/drive_simple_speed_test2.dir/drive_simple_speed_test2.cpp.o
+.PHONY : drive_simple_speed_test2.cpp.o
+
+drive_simple_speed_test2.i: drive_simple_speed_test2.cpp.i
+.PHONY : drive_simple_speed_test2.i
+
+# target to preprocess a source file
+drive_simple_speed_test2.cpp.i:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/drive_simple_speed_test2.dir/build.make src/tests/CMakeFiles/drive_simple_speed_test2.dir/drive_simple_speed_test2.cpp.i
+.PHONY : drive_simple_speed_test2.cpp.i
+
+drive_simple_speed_test2.s: drive_simple_speed_test2.cpp.s
+.PHONY : drive_simple_speed_test2.s
+
+# target to generate assembly for a file
+drive_simple_speed_test2.cpp.s:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/drive_simple_speed_test2.dir/build.make src/tests/CMakeFiles/drive_simple_speed_test2.dir/drive_simple_speed_test2.cpp.s
+.PHONY : drive_simple_speed_test2.cpp.s
+
 dyno2_integrated_test1.o: dyno2_integrated_test1.cpp.o
 .PHONY : dyno2_integrated_test1.o
 
@@ -292,6 +344,30 @@ dyno2_integrated_test1.s: dyno2_integrated_test1.cpp.s
 dyno2_integrated_test1.cpp.s:
 	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/dyno2_integrated_test1.dir/build.make src/tests/CMakeFiles/dyno2_integrated_test1.dir/dyno2_integrated_test1.cpp.s
 .PHONY : dyno2_integrated_test1.cpp.s
+
+dyno2_integrated_test2.o: dyno2_integrated_test2.cpp.o
+.PHONY : dyno2_integrated_test2.o
+
+# target to build an object file
+dyno2_integrated_test2.cpp.o:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/dyno2_integrated_test2.dir/build.make src/tests/CMakeFiles/dyno2_integrated_test2.dir/dyno2_integrated_test2.cpp.o
+.PHONY : dyno2_integrated_test2.cpp.o
+
+dyno2_integrated_test2.i: dyno2_integrated_test2.cpp.i
+.PHONY : dyno2_integrated_test2.i
+
+# target to preprocess a source file
+dyno2_integrated_test2.cpp.i:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/dyno2_integrated_test2.dir/build.make src/tests/CMakeFiles/dyno2_integrated_test2.dir/dyno2_integrated_test2.cpp.i
+.PHONY : dyno2_integrated_test2.cpp.i
+
+dyno2_integrated_test2.s: dyno2_integrated_test2.cpp.s
+.PHONY : dyno2_integrated_test2.s
+
+# target to generate assembly for a file
+dyno2_integrated_test2.cpp.s:
+	cd /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build && $(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/dyno2_integrated_test2.dir/build.make src/tests/CMakeFiles/dyno2_integrated_test2.dir/dyno2_integrated_test2.cpp.s
+.PHONY : dyno2_integrated_test2.cpp.s
 
 el2004_output_hold.o: el2004_output_hold.cpp.o
 .PHONY : el2004_output_hold.o
@@ -402,7 +478,9 @@ help:
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
 	@echo "... drive_simple_speed_test1"
+	@echo "... drive_simple_speed_test2"
 	@echo "... dyno2_integrated_test1"
+	@echo "... dyno2_integrated_test2"
 	@echo "... el2004_output_hold"
 	@echo "... el5032_data_read"
 	@echo "... elm3002_data_read"
@@ -410,9 +488,15 @@ help:
 	@echo "... drive_simple_speed_test1.o"
 	@echo "... drive_simple_speed_test1.i"
 	@echo "... drive_simple_speed_test1.s"
+	@echo "... drive_simple_speed_test2.o"
+	@echo "... drive_simple_speed_test2.i"
+	@echo "... drive_simple_speed_test2.s"
 	@echo "... dyno2_integrated_test1.o"
 	@echo "... dyno2_integrated_test1.i"
 	@echo "... dyno2_integrated_test1.s"
+	@echo "... dyno2_integrated_test2.o"
+	@echo "... dyno2_integrated_test2.i"
+	@echo "... dyno2_integrated_test2.s"
 	@echo "... el2004_output_hold.o"
 	@echo "... el2004_output_hold.i"
 	@echo "... el2004_output_hold.s"

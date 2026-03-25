@@ -305,6 +305,19 @@ el2004_output_hold/fast:
 .PHONY : el2004_output_hold/fast
 
 #=============================================================================
+# Target rules for targets named drive_simple_speed_test2
+
+# Build rule for target.
+drive_simple_speed_test2: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 drive_simple_speed_test2
+.PHONY : drive_simple_speed_test2
+
+# fast build rule for target.
+drive_simple_speed_test2/fast:
+	$(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/drive_simple_speed_test2.dir/build.make src/tests/CMakeFiles/drive_simple_speed_test2.dir/build
+.PHONY : drive_simple_speed_test2/fast
+
+#=============================================================================
 # Target rules for targets named dyno2_integrated_test1
 
 # Build rule for target.
@@ -316,6 +329,19 @@ dyno2_integrated_test1: cmake_check_build_system
 dyno2_integrated_test1/fast:
 	$(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/dyno2_integrated_test1.dir/build.make src/tests/CMakeFiles/dyno2_integrated_test1.dir/build
 .PHONY : dyno2_integrated_test1/fast
+
+#=============================================================================
+# Target rules for targets named dyno2_integrated_test2
+
+# Build rule for target.
+dyno2_integrated_test2: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 dyno2_integrated_test2
+.PHONY : dyno2_integrated_test2
+
+# fast build rule for target.
+dyno2_integrated_test2/fast:
+	$(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/dyno2_integrated_test2.dir/build.make src/tests/CMakeFiles/dyno2_integrated_test2.dir/build
+.PHONY : dyno2_integrated_test2/fast
 
 # Help Target
 help:
@@ -330,7 +356,9 @@ help:
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
 	@echo "... drive_simple_speed_test1"
+	@echo "... drive_simple_speed_test2"
 	@echo "... dyno2_integrated_test1"
+	@echo "... dyno2_integrated_test2"
 	@echo "... eepromtool"
 	@echo "... el2004_output_hold"
 	@echo "... el5032_data_read"

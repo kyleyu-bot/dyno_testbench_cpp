@@ -87,5 +87,7 @@ set(CMAKE_DEPEND_INFO_FILES
   "src/tests/CMakeFiles/elm3002_pdo_check.dir/DependInfo.cmake"
   "src/tests/CMakeFiles/el5032_data_read.dir/DependInfo.cmake"
   "src/tests/CMakeFiles/el2004_output_hold.dir/DependInfo.cmake"
+  "src/tests/CMakeFiles/drive_simple_speed_test2.dir/DependInfo.cmake"
   "src/tests/CMakeFiles/dyno2_integrated_test1.dir/DependInfo.cmake"
+  "src/tests/CMakeFiles/dyno2_integrated_test2.dir/DependInfo.cmake"
   )
