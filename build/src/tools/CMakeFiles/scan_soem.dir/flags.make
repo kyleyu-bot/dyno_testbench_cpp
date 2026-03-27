@@ -6,5 +6,5 @@ CXX_DEFINES =
 
 CXX_INCLUDES = -I/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/soem -I/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal -I/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal/linux -I/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/oshw/linux
 
-CXX_FLAGS = -g -Wall -Wextra -std=c++20
+CXX_FLAGS = -O2 -g -DNDEBUG -Wall -Wextra -std=c++20
 

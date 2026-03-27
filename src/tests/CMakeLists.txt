@@ -1,5 +1,5 @@
 set(SOEM_INCLUDES
-    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
     ${soem_SOURCE_DIR}/soem
     ${soem_SOURCE_DIR}/osal
     ${soem_SOURCE_DIR}/osal/linux

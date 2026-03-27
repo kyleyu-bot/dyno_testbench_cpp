@@ -34,7 +34,7 @@ set(JSON_INCLUDE_DIR "${DYNO_BUILD_DIR}/_deps/nlohmann_json-src/include")
 add_executable(bridge_ros2 bridge_ros2.cpp)
 
 target_include_directories(bridge_ros2 PRIVATE
-    "${DYNO_ROOT}/include"
+    "${DYNO_ROOT}/src"
     ${SOEM_INCLUDE_DIRS}
     ${JSON_INCLUDE_DIR}
 )

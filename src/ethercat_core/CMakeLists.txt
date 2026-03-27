@@ -13,7 +13,7 @@ add_library(ethercat_core STATIC
 
 target_include_directories(ethercat_core
     PUBLIC
-        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src
     PRIVATE
         # SOEM v1.4.0 uses the old-style include_directories() which does not
         # propagate through the 'soem' target.  Add the paths explicitly here.

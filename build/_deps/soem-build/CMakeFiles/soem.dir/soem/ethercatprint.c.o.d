@@ -23,6 +23,8 @@ _deps/soem-build/CMakeFiles/soem.dir/soem/ethercatprint.c.o: \
  /usr/include/x86_64-linux-gnu/bits/stdio_lim.h \
  /usr/include/x86_64-linux-gnu/bits/floatn.h \
  /usr/include/x86_64-linux-gnu/bits/floatn-common.h \
+ /usr/include/x86_64-linux-gnu/bits/stdio.h \
+ /usr/include/x86_64-linux-gnu/bits/stdio2.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/oshw/linux/oshw.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/soem/ethercattype.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal/osal.h \
