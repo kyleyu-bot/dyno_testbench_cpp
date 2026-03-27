@@ -1,3 +1,0 @@
-[0.000000] (-) TimerEvent: {}
-[0.000272] (-) JobUnselected: {'identifier': 'dyno_testbench_cpp'}
-[0.000378] (-) EventReactorShutdown: {}
