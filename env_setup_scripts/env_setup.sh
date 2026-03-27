@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Note: intentionally no set -e so that sourcing this script does not kill
+# the calling shell if a step fails.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -61,3 +62,20 @@ run_step "Applying NIC/IRQ realtime setup" \
 
 echo
 echo "Environment setup complete."
+
+# ── ROS2 environment ──────────────────────────────────────────────────────────
+# These only take effect in the calling shell when this script is sourced:
+#   source env_setup_scripts/env_setup.sh
+# They have no effect when the script is executed as a subprocess (./env_setup.sh).
+
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+if [[ -f /opt/ros/humble/setup.bash ]]; then
+    # shellcheck source=/dev/null
+    source /opt/ros/humble/setup.bash
+    export FASTRTPS_DEFAULT_PROFILES_FILE="${REPO_ROOT}/src/interface_bridges/ros2/fastdds_no_shm.xml"
+    echo "ROS2 Humble sourced. FASTRTPS_DEFAULT_PROFILES_FILE set."
+    echo "Run the ROS2 bridge with: sudo -E ./build/dyno_ros2_bridge/bridge_ros2"
+else
+    echo "ROS2 Humble not found at /opt/ros/humble — skipping ROS2 setup."
+fi

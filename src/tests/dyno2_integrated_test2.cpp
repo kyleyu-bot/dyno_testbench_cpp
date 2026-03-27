@@ -531,16 +531,9 @@ int main(int argc, char** argv) {
     }
 
     // ── Graceful shutdown ─────────────────────────────────────────────────────
-    std::printf("Disabling drives (graceful shutdown)...\n");
-    {
-        SystemCommand sys;
-        sys.by_slave[args.drive_slave] = buildDriveCmd(cmd_mode, 0, false, false, drive_gains);
-        sys.by_slave[args.dut_slave]   = buildDriveCmd(cmd_mode, 0, false, false, dut_gains);
-        sys.by_slave[args.io_slave]    = beckhoff::el2004::Command{};
-        loop.setCommand(sys);
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    }
-    std::printf("Drives disabled. Stopping loop.\n");
+    // Stop directly — any DS402 walkback through READY_TO_SWITCH_ON resets
+    // the Capitan drive's velocity gain registers.  PDO watchdog handles AL exit.
+    std::printf("Stopping loop.\n");
 
     loop.stop();
     master.close();

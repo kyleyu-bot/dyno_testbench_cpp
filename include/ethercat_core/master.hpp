@@ -26,10 +26,12 @@ struct PdoMappingEntry {
 // Per-slave topology configuration loaded from the JSON file.
 struct SlaveConfig {
     std::string               name;
-    int                       position     = -1;  // 0-based; -1 = auto-discover
+    int                       position      = -1;   // 0-based; -1 = auto-discover
+    uint16_t                  alias_address = 0;    // EtherCAT alias (0 = not used for matching)
     std::string               kind;
-    uint32_t                  vendor_id    = 0;
-    uint32_t                  product_code = 0;
+    uint32_t                  vendor_id     = 0;
+    uint32_t                  product_code  = 0;
+    bool                      optional      = false; // if true, missing slave is not fatal
     std::vector<PdoMappingEntry> pdo_mapping;
 
     struct Scaling {

@@ -1,0 +1,122 @@
+[0.000000] (-) TimerEvent: {}
+[0.001275] (dyno_ros2_bridge) JobQueued: {'identifier': 'dyno_ros2_bridge', 'dependencies': OrderedDict()}
+[0.001948] (dyno_ros2_bridge) JobStarted: {'identifier': 'dyno_ros2_bridge'}
+[0.011035] (dyno_ros2_bridge) JobProgress: {'identifier': 'dyno_ros2_bridge', 'progress': 'cmake'}
+[0.011857] (dyno_ros2_bridge) JobProgress: {'identifier': 'dyno_ros2_bridge', 'progress': 'build'}
+[0.012040] (dyno_ros2_bridge) Command: {'cmd': ['/usr/bin/cmake', '--build', '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge', '--', '-j15', '-l15'], 'cwd': '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge', 'env': OrderedDict([('LESSOPEN', '| /usr/bin/lesspipe %s'), ('VSCODE_CWD', '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp'), ('VSCODE_ESM_ENTRYPOINT', 'vs/workbench/api/node/extensionHostProcess'), ('USER', 'dyno-nuc2'), ('CLAUDE_CODE_ENTRYPOINT', 'claude-vscode'), ('VSCODE_NLS_CONFIG', '{"userLocale":"en-us","osLocale":"en-us","resolvedLanguage":"en","defaultMessagesFile":"/usr/share/code/resources/app/out/nls.messages.json","locale":"en-us","availableLanguages":{}}'), ('GIT_EDITOR', 'true'), ('VSCODE_HANDLES_UNCAUGHT_ERRORS', 'true'), ('XDG_SESSION_TYPE', 'x11'), ('SHLVL', '1'), ('HOME', '/home/dyno-nuc2'), ('CHROME_DESKTOP', 'code.desktop'), ('OLDPWD', '/home/dyno-nuc2'), ('DESKTOP_SESSION', 'ubuntu'), ('VSCODE_IPC_HOOK', '/run/user/1000/vscode-c62f7290-1.11-main.sock'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('SYSTEMD_EXEC_PID', '2217'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('VSCODE_CRASH_REPORTER_PROCESS_TYPE', 'extensionHost'), ('ROS_DISTRO', 'humble'), ('GTK_IM_MODULE', 'ibus'), ('LOGNAME', 'dyno-nuc2'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('USERNAME', 'dyno-nuc2'), ('TERM', 'xterm-256color'), ('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', 'delta'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('FC_FONTATIONS', '1'), ('ROS_LOCALHOST_ONLY', '0'), ('WINDOWPATH', '2'), ('PATH', '/usr/bin:/home/dyno-nuc2/.local/bin:/opt/ros/humble/bin:/home/dyno-nuc2/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/dynonuc2-desktop:@/tmp/.ICE-unix/2190,unix/dynonuc2-desktop:/tmp/.ICE-unix/2190'), ('COREPACK_ENABLE_AUTO_PIN', '0'), ('XDG_MENU_PREFIX', 'gnome-'), ('GNOME_TERMINAL_SCREEN', '/org/gnome/Terminal/screen/3da9a4c9_c226_468f_b9dc_e40a7db4384e'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('GDK_BACKEND', 'x11'), ('DISPLAY', ':1'), ('NoDefaultCurrentDirectoryInExePath', '1'), ('LANG', 'en_US.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('XMODIFIERS', '@im=ibus'), ('XDG_SESSION_DESKTOP', 'ubuntu'), ('XAUTHORITY', '/run/user/1000/gdm/Xauthority'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('GNOME_TERMINAL_SERVICE', ':1.91'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('AMENT_PREFIX_PATH', '/opt/ros/humble'), ('SHELL', '/bin/bash'), ('QT_ACCESSIBILITY', '1'), ('ELECTRON_RUN_AS_NODE', '1'), ('GDMSESSION', 'ubuntu'), ('CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING', 'true'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('CLAUDECODE', '1'), ('GPG_AGENT_INFO', '/run/user/1000/gnupg/S.gpg-agent:0:1'), ('VIRTUAL_ENV', '/usr'), ('QT_IM_MODULE', 'ibus'), ('PWD', '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge'), ('VSCODE_CLI', '1'), ('LC_ALL', 'en_US.UTF-8'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu:/etc/xdg'), ('VSCODE_CODE_CACHE_PATH', '/home/dyno-nuc2/.config/Code/CachedData/61b3d0ab13be7dda2389f1d3e60a119c7f660cc3'), ('XDG_DATA_DIRS', '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('COLCON', '1'), ('VTE_VERSION', '6800'), ('ELECTRON_NO_ATTACH_CONSOLE', '1'), ('VSCODE_PID', '4324'), ('CMAKE_PREFIX_PATH', '/opt/ros/humble')]), 'shell': False}
+[0.076314] (dyno_ros2_bridge) StdoutLine: {'line': b'[ 50%] Building CXX object CMakeFiles/bridge_ros2.dir/bridge_ros2.cpp.o\n'}
+[0.099968] (-) TimerEvent: {}
+[0.200261] (-) TimerEvent: {}
+[0.300527] (-) TimerEvent: {}
+[0.400808] (-) TimerEvent: {}
+[0.501043] (-) TimerEvent: {}
+[0.601286] (-) TimerEvent: {}
+[0.701486] (-) TimerEvent: {}
+[0.801720] (-) TimerEvent: {}
+[0.901914] (-) TimerEvent: {}
+[1.002132] (-) TimerEvent: {}
+[1.102393] (-) TimerEvent: {}
+[1.202610] (-) TimerEvent: {}
+[1.302872] (-) TimerEvent: {}
+[1.403198] (-) TimerEvent: {}
+[1.503373] (-) TimerEvent: {}
+[1.603598] (-) TimerEvent: {}
+[1.703904] (-) TimerEvent: {}
+[1.804202] (-) TimerEvent: {}
+[1.904384] (-) TimerEvent: {}
+[2.004587] (-) TimerEvent: {}
+[2.104894] (-) TimerEvent: {}
+[2.205177] (-) TimerEvent: {}
+[2.305389] (-) TimerEvent: {}
+[2.405551] (-) TimerEvent: {}
+[2.505727] (-) TimerEvent: {}
+[2.606000] (-) TimerEvent: {}
+[2.706300] (-) TimerEvent: {}
+[2.806467] (-) TimerEvent: {}
+[2.906655] (-) TimerEvent: {}
+[3.006865] (-) TimerEvent: {}
+[3.107134] (-) TimerEvent: {}
+[3.207349] (-) TimerEvent: {}
+[3.307520] (-) TimerEvent: {}
+[3.407850] (-) TimerEvent: {}
+[3.508163] (-) TimerEvent: {}
+[3.608347] (-) TimerEvent: {}
+[3.708529] (-) TimerEvent: {}
+[3.808795] (-) TimerEvent: {}
+[3.909039] (-) TimerEvent: {}
+[4.009422] (-) TimerEvent: {}
+[4.109677] (-) TimerEvent: {}
+[4.209888] (-) TimerEvent: {}
+[4.310080] (-) TimerEvent: {}
+[4.410249] (-) TimerEvent: {}
+[4.510437] (-) TimerEvent: {}
+[4.610693] (-) TimerEvent: {}
+[4.711000] (-) TimerEvent: {}
+[4.811192] (-) TimerEvent: {}
+[4.911417] (-) TimerEvent: {}
+[5.011619] (-) TimerEvent: {}
+[5.111811] (-) TimerEvent: {}
+[5.212021] (-) TimerEvent: {}
+[5.312256] (-) TimerEvent: {}
+[5.412449] (-) TimerEvent: {}
+[5.512654] (-) TimerEvent: {}
+[5.612875] (-) TimerEvent: {}
+[5.713124] (-) TimerEvent: {}
+[5.813377] (-) TimerEvent: {}
+[5.913554] (-) TimerEvent: {}
+[6.013792] (-) TimerEvent: {}
+[6.114051] (-) TimerEvent: {}
+[6.214311] (-) TimerEvent: {}
+[6.314521] (-) TimerEvent: {}
+[6.414789] (-) TimerEvent: {}
+[6.515095] (-) TimerEvent: {}
+[6.615298] (-) TimerEvent: {}
+[6.715480] (-) TimerEvent: {}
+[6.815668] (-) TimerEvent: {}
+[6.915869] (-) TimerEvent: {}
+[7.016262] (-) TimerEvent: {}
+[7.116669] (-) TimerEvent: {}
+[7.216863] (-) TimerEvent: {}
+[7.317112] (-) TimerEvent: {}
+[7.417379] (-) TimerEvent: {}
+[7.517561] (-) TimerEvent: {}
+[7.617778] (-) TimerEvent: {}
+[7.717961] (-) TimerEvent: {}
+[7.818139] (-) TimerEvent: {}
+[7.918353] (-) TimerEvent: {}
+[8.018548] (-) TimerEvent: {}
+[8.118743] (-) TimerEvent: {}
+[8.218977] (-) TimerEvent: {}
+[8.319222] (-) TimerEvent: {}
+[8.419453] (-) TimerEvent: {}
+[8.462345] (dyno_ros2_bridge) StdoutLine: {'line': b'[100%] Linking CXX executable bridge_ros2\n'}
+[8.519558] (-) TimerEvent: {}
+[8.619753] (-) TimerEvent: {}
+[8.719999] (-) TimerEvent: {}
+[8.820304] (-) TimerEvent: {}
+[8.920550] (-) TimerEvent: {}
+[8.952496] (dyno_ros2_bridge) StdoutLine: {'line': b'[100%] Built target bridge_ros2\n'}
+[8.964080] (dyno_ros2_bridge) CommandEnded: {'returncode': 0}
+[8.965194] (dyno_ros2_bridge) JobProgress: {'identifier': 'dyno_ros2_bridge', 'progress': 'install'}
+[8.973836] (dyno_ros2_bridge) Command: {'cmd': ['/usr/bin/cmake', '--install', '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge'], 'cwd': '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge', 'env': OrderedDict([('LESSOPEN', '| /usr/bin/lesspipe %s'), ('VSCODE_CWD', '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp'), ('VSCODE_ESM_ENTRYPOINT', 'vs/workbench/api/node/extensionHostProcess'), ('USER', 'dyno-nuc2'), ('CLAUDE_CODE_ENTRYPOINT', 'claude-vscode'), ('VSCODE_NLS_CONFIG', '{"userLocale":"en-us","osLocale":"en-us","resolvedLanguage":"en","defaultMessagesFile":"/usr/share/code/resources/app/out/nls.messages.json","locale":"en-us","availableLanguages":{}}'), ('GIT_EDITOR', 'true'), ('VSCODE_HANDLES_UNCAUGHT_ERRORS', 'true'), ('XDG_SESSION_TYPE', 'x11'), ('SHLVL', '1'), ('HOME', '/home/dyno-nuc2'), ('CHROME_DESKTOP', 'code.desktop'), ('OLDPWD', '/home/dyno-nuc2'), ('DESKTOP_SESSION', 'ubuntu'), ('VSCODE_IPC_HOOK', '/run/user/1000/vscode-c62f7290-1.11-main.sock'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('SYSTEMD_EXEC_PID', '2217'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('VSCODE_CRASH_REPORTER_PROCESS_TYPE', 'extensionHost'), ('ROS_DISTRO', 'humble'), ('GTK_IM_MODULE', 'ibus'), ('LOGNAME', 'dyno-nuc2'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('USERNAME', 'dyno-nuc2'), ('TERM', 'xterm-256color'), ('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', 'delta'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('FC_FONTATIONS', '1'), ('ROS_LOCALHOST_ONLY', '0'), ('WINDOWPATH', '2'), ('PATH', '/usr/bin:/home/dyno-nuc2/.local/bin:/opt/ros/humble/bin:/home/dyno-nuc2/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/dynonuc2-desktop:@/tmp/.ICE-unix/2190,unix/dynonuc2-desktop:/tmp/.ICE-unix/2190'), ('COREPACK_ENABLE_AUTO_PIN', '0'), ('XDG_MENU_PREFIX', 'gnome-'), ('GNOME_TERMINAL_SCREEN', '/org/gnome/Terminal/screen/3da9a4c9_c226_468f_b9dc_e40a7db4384e'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('GDK_BACKEND', 'x11'), ('DISPLAY', ':1'), ('NoDefaultCurrentDirectoryInExePath', '1'), ('LANG', 'en_US.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('XMODIFIERS', '@im=ibus'), ('XDG_SESSION_DESKTOP', 'ubuntu'), ('XAUTHORITY', '/run/user/1000/gdm/Xauthority'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('GNOME_TERMINAL_SERVICE', ':1.91'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('AMENT_PREFIX_PATH', '/opt/ros/humble'), ('SHELL', '/bin/bash'), ('QT_ACCESSIBILITY', '1'), ('ELECTRON_RUN_AS_NODE', '1'), ('GDMSESSION', 'ubuntu'), ('CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING', 'true'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('CLAUDECODE', '1'), ('GPG_AGENT_INFO', '/run/user/1000/gnupg/S.gpg-agent:0:1'), ('VIRTUAL_ENV', '/usr'), ('QT_IM_MODULE', 'ibus'), ('PWD', '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge'), ('VSCODE_CLI', '1'), ('LC_ALL', 'en_US.UTF-8'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu:/etc/xdg'), ('VSCODE_CODE_CACHE_PATH', '/home/dyno-nuc2/.config/Code/CachedData/61b3d0ab13be7dda2389f1d3e60a119c7f660cc3'), ('XDG_DATA_DIRS', '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('COLCON', '1'), ('VTE_VERSION', '6800'), ('ELECTRON_NO_ATTACH_CONSOLE', '1'), ('VSCODE_PID', '4324'), ('CMAKE_PREFIX_PATH', '/opt/ros/humble')]), 'shell': False}
+[8.979103] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Install configuration: ""\n'}
+[8.979319] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Installing: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/lib/dyno_ros2_bridge/bridge_ros2\n'}
+[8.986266] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Set runtime path of "/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/lib/dyno_ros2_bridge/bridge_ros2" to ""\n'}
+[8.986559] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/ament_index/resource_index/package_run_dependencies/dyno_ros2_bridge\n'}
+[8.986646] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/ament_index/resource_index/parent_prefix_path/dyno_ros2_bridge\n'}
+[8.986720] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/environment/ament_prefix_path.sh\n'}
+[8.986791] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/environment/ament_prefix_path.dsv\n'}
+[8.986860] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/environment/path.sh\n'}
+[8.986930] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/environment/path.dsv\n'}
+[8.986998] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/local_setup.bash\n'}
+[8.987066] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/local_setup.sh\n'}
+[8.987133] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/local_setup.zsh\n'}
+[8.987217] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/local_setup.dsv\n'}
+[8.987292] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Installing: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/package.dsv\n'}
+[8.987655] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/ament_index/resource_index/packages/dyno_ros2_bridge\n'}
+[8.988192] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/cmake/dyno_ros2_bridgeConfig.cmake\n'}
+[8.988516] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/cmake/dyno_ros2_bridgeConfig-version.cmake\n'}
+[8.988576] (dyno_ros2_bridge) StdoutLine: {'line': b'-- Up-to-date: /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/install/dyno_ros2_bridge/share/dyno_ros2_bridge/package.xml\n'}
+[8.988614] (dyno_ros2_bridge) CommandEnded: {'returncode': 0}
+[8.999889] (dyno_ros2_bridge) JobEnded: {'identifier': 'dyno_ros2_bridge', 'rc': 0}
+[9.000398] (-) EventReactorShutdown: {}

@@ -1,0 +1,4 @@
+Invoking command in '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge -- -j15 -l15
+Invoked command in '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge -- -j15 -l15
+Invoking command in '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge
+Invoked command in '/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/dyno_ros2_bridge

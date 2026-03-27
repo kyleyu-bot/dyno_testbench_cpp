@@ -39,11 +39,14 @@ uint16_t controlwordFromCommand(bool enable_drive, bool clear_fault, Cia402State
     if (!enable_drive) {
         switch (state) {
         case Cia402State::OPERATION_ENABLED:
+            return 0x0007u;  // Disable Operation → SWITCHED_ON (step down, don't skip)
         case Cia402State::SWITCHED_ON:
         case Cia402State::READY_TO_SWITCH_ON:
+            return 0x0006u;  // Shutdown → READY_TO_SWITCH_ON
         case Cia402State::SWITCH_ON_DISABLED:
+            return 0x0006u;  // Already safe, hold
         case Cia402State::QUICK_STOP_ACTIVE:
-            return 0x0006u;  // Shutdown
+            return 0x0000u;  // Disable voltage from quick-stop
         default:
             return 0x0000u;  // Disable voltage
         }

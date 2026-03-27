@@ -20,6 +20,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "_deps/soem-src/test/linux/simple_test/CMakeLists.txt"
   "_deps/soem-src/test/linux/slaveinfo/CMakeLists.txt"
   "../src/ethercat_core/CMakeLists.txt"
+  "../src/interface_bridges/CMakeLists.txt"
   "../src/tests/CMakeLists.txt"
   "../src/tools/CMakeLists.txt"
   "/usr/share/cmake-3.22/Modules/CMakeCInformation.cmake"
@@ -72,6 +73,7 @@ set(CMAKE_MAKEFILE_PRODUCTS
   "src/ethercat_core/CMakeFiles/CMakeDirectoryInformation.cmake"
   "src/tools/CMakeFiles/CMakeDirectoryInformation.cmake"
   "src/tests/CMakeFiles/CMakeDirectoryInformation.cmake"
+  "src/interface_bridges/CMakeFiles/CMakeDirectoryInformation.cmake"
   )
 
 # Dependency information for all targets:
@@ -90,4 +92,5 @@ set(CMAKE_DEPEND_INFO_FILES
   "src/tests/CMakeFiles/drive_simple_speed_test2.dir/DependInfo.cmake"
   "src/tests/CMakeFiles/dyno2_integrated_test1.dir/DependInfo.cmake"
   "src/tests/CMakeFiles/dyno2_integrated_test2.dir/DependInfo.cmake"
+  "src/interface_bridges/CMakeFiles/bridge_udp.dir/DependInfo.cmake"
   )

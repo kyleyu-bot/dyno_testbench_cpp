@@ -106,7 +106,7 @@
       "name": "dut",
       "position": 6,
       "kind": "volcano",
-      "alias_address": 3002,
+      "optional": true,
       "vendor_id": 668,
       "product_code": 262344705,
       "scaling": {

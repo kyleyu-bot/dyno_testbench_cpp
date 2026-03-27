@@ -478,33 +478,21 @@ int main(int argc, char** argv) {
     }
 
     // ── Graceful shutdown ─────────────────────────────────────────────────────
-    // Send enable_drive=false for ~200 ms so the DS402 state machine can walk
-    // back to SWITCH_ON_DISABLED before the bus is torn down.  Without this
-    // the drive's PDO watchdog fires the instant loop.stop() kills cyclic PDO,
-    // landing it in FAULT and requiring a power cycle.
-    std::printf("Disabling drive (graceful shutdown)...\n");
+    // Send enable_drive=false, then poll until the drive leaves OPERATION_ENABLED
+    // before calling loop.stop().  Without this the watchdog fires the instant
+    // cyclic PDO stops, landing the drive in FAULT.
+    // Stop directly — any DS402 walkback through READY_TO_SWITCH_ON resets
+    // the Capitan drive's velocity gain registers.  PDO watchdog handles AL exit.
     {
-        Command disable_cmd;
-        disable_cmd.mode_of_operation      = cmd_mode;
-        disable_cmd.torque_kp              = torque_kp;
-        disable_cmd.torque_loop_max_output = vel_qr;
-        disable_cmd.torque_loop_min_output = vel_is;
-        disable_cmd.velocity_loop_kp       = vel_kp;
-        disable_cmd.velocity_loop_ki       = vel_ki;
-        disable_cmd.velocity_loop_kd       = vel_kd;
-        disable_cmd.position_loop_kp       = pos_kp;
-        disable_cmd.position_loop_ki       = pos_ki;
-        disable_cmd.position_loop_kd       = pos_kd;
-        disable_cmd.enable_drive           = false;
-        disable_cmd.clear_fault            = false;
-
-        SystemCommand sys;
-        sys.by_slave[args.drive_slave]  = disable_cmd;
-        sys.by_slave[args.io_slave]     = beckhoff::el2004::Command{};  // output cleared
-        loop.setCommand(sys);
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        const SystemStatus s = loop.getStatus();
+        auto it = s.by_slave.find(args.drive_slave);
+        if (it != s.by_slave.end() && it->second.has_value()) {
+            const auto& ds = std::any_cast<const DriveStatus&>(it->second);
+            std::printf("[shutdown] %s was in %s — stopping loop\n",
+                args.drive_slave.c_str(), cia402Name(ds.cia402_state));
+        }
     }
-    std::printf("Drive disabled. Stopping loop.\n");
+    std::printf("Stopping loop.\n");
 
     loop.stop();
     master.close();

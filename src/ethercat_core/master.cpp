@@ -16,6 +16,7 @@ extern "C" {
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
@@ -53,11 +54,13 @@ MasterConfig loadTopology(const std::string& path) {
 
     for (auto& entry : raw_slaves) {
         SlaveConfig sc;
-        sc.name         = entry.at("name").get<std::string>();
-        sc.position     = entry.value("position", -1);
-        sc.kind         = entry.at("kind").get<std::string>();
-        sc.vendor_id    = entry.value("vendor_id",   0u);
-        sc.product_code = entry.value("product_code", 0u);
+        sc.name          = entry.at("name").get<std::string>();
+        sc.position      = entry.value("position", -1);
+        sc.alias_address = static_cast<uint16_t>(entry.value("alias_address", 0));
+        sc.kind          = entry.at("kind").get<std::string>();
+        sc.vendor_id     = entry.value("vendor_id",   0u);
+        sc.product_code  = entry.value("product_code", 0u);
+        sc.optional      = entry.value("optional", false);
 
         for (auto& pm : entry.value("pdo_mapping", nlohmann::json::array())) {
             PdoMappingEntry e;
@@ -172,15 +175,48 @@ MasterRuntime& EthercatMaster::initialize() {
 
     transitionToPreOp();
 
+    // Dump all detected slaves so topology mismatches are easy to diagnose.
+    std::fprintf(stderr, "[master] Detected %d slaves:\n", ec_slavecount);
+    for (int i = 1; i <= ec_slavecount; ++i) {
+        std::fprintf(stderr,
+            "[master]   SOEM[%d] pos=%d vendor=0x%08X product=0x%08X alias=%u name='%s'\n",
+            i, i - 1,
+            static_cast<unsigned>(ec_slave[i].eep_man),
+            static_cast<unsigned>(ec_slave[i].eep_id),
+            static_cast<unsigned>(ec_slave[i].aliasadr),
+            ec_slave[i].name
+        );
+    }
+
     // Resolve positions and build adapters.
+    // Track claimed SOEM indices so two slaves never map to the same physical device.
+    std::set<int> used_soem_indices;
     for (auto& sc : config_.slaves) {
-        sc.position = resolvePosition(sc);
+        try {
+            sc.position = resolvePosition(sc);
+            const int soem_idx = sc.position + 1;  // 1-based
+            if (used_soem_indices.count(soem_idx)) {
+                std::ostringstream oss;
+                oss << "Slave '" << sc.name << "' resolved to SOEM index " << soem_idx
+                    << " which is already claimed by another slave.";
+                throw MasterConfigError(oss.str());
+            }
+            used_soem_indices.insert(soem_idx);
+        } catch (const MasterConfigError& e) {
+            if (sc.optional) {
+                std::fprintf(stderr, "[master] Optional slave '%s' skipped: %s\n",
+                             sc.name.c_str(), e.what());
+                continue;
+            }
+            throw;
+        }
         runtime_.adapters[sc.name] = buildAdapter(sc);
         runtime_.slave_index[sc.name] = sc.position + 1;  // SOEM is 1-based
     }
 
     // Validate identity, read startup SDOs, apply PDO mapping writes.
     for (auto& sc : config_.slaves) {
+        if (runtime_.slave_index.find(sc.name) == runtime_.slave_index.end()) continue;
         const int soem_idx = runtime_.slave_index.at(sc.name);
         validateIdentity(sc, soem_idx);
         readStartupParams(sc, soem_idx, *runtime_.adapters.at(sc.name));
@@ -193,6 +229,7 @@ MasterRuntime& EthercatMaster::initialize() {
 
     if (config_.strict_pdo_size) {
         for (auto& sc : config_.slaves) {
+            if (runtime_.slave_index.find(sc.name) == runtime_.slave_index.end()) continue;
             const int soem_idx = runtime_.slave_index.at(sc.name);
             validatePdoSizes(sc, soem_idx, *runtime_.adapters.at(sc.name));
         }
@@ -206,6 +243,10 @@ MasterRuntime& EthercatMaster::initialize() {
 void EthercatMaster::close() {
     if (!initialized_) return;
 
+    // Request INIT directly — do not go through SAFE-OP explicitly.
+    // The Capitan/Volcano drive resets its volatile gain registers (0x250A/B)
+    // during a master-driven OP→SAFE-OP transition, causing gains to read as 0
+    // on the next initialize().  Going directly to INIT avoids this.
     ec_slave[0].state = EC_STATE_INIT;
     ec_writestate(0);
     ec_statecheck(0, EC_STATE_INIT, EC_TIMEOUTSTATE);
@@ -268,19 +309,35 @@ void EthercatMaster::validateIdentity(const SlaveConfig& cfg, int soem_idx) {
 }
 
 int EthercatMaster::resolvePosition(const SlaveConfig& cfg) {
-    // Try the configured position first.
+    // If an alias address is specified, scan for it first — alias uniquely
+    // identifies a slave even when vendor_id + product_code are shared across
+    // multiple slaves of the same model (e.g. two identical drives).
+    if (cfg.alias_address != 0) {
+        for (int i = 1; i <= ec_slavecount; ++i) {
+            if (static_cast<uint16_t>(ec_slave[i].aliasadr) == cfg.alias_address) {
+                return i - 1;  // return 0-based
+            }
+        }
+        // Alias not found — caller handles optional slaves.
+        std::ostringstream oss;
+        oss << "No slave found with alias 0x" << std::hex << cfg.alias_address
+            << " for '" << cfg.name << "'.";
+        throw MasterConfigError(oss.str());
+    }
+
+    // No alias: try the configured position first.
     if (cfg.position >= 0 && cfg.position < ec_slavecount) {
         const auto& sl = ec_slave[cfg.position + 1];  // 1-based
         bool vendor_ok  = !cfg.vendor_id    || static_cast<uint32_t>(sl.eep_man) == cfg.vendor_id;
         bool product_ok = !cfg.product_code || static_cast<uint32_t>(sl.eep_id)  == cfg.product_code;
         if (vendor_ok && product_ok) return cfg.position;
     }
-    // Fall back: scan all slaves.
+    // Fall back: scan all slaves by vendor + product.
     for (int i = 1; i <= ec_slavecount; ++i) {
         const auto& sl = ec_slave[i];
         bool vendor_ok  = !cfg.vendor_id    || static_cast<uint32_t>(sl.eep_man) == cfg.vendor_id;
         bool product_ok = !cfg.product_code || static_cast<uint32_t>(sl.eep_id)  == cfg.product_code;
-        if (vendor_ok && product_ok) return i - 1;  // return 0-based
+        if (vendor_ok && product_ok) return i - 1;
     }
     std::ostringstream oss;
     oss << std::hex << "No slave matched '" << cfg.name << "' "
@@ -376,8 +433,9 @@ void EthercatMaster::readStartupParams(
 
 bool EthercatMaster::allSlavesInOp() const {
     for (const auto& sc : config_.slaves) {
-        const int soem_idx = runtime_.slave_index.at(sc.name);
-        if ((ec_slave[soem_idx].state & 0x0Fu) != EC_STATE_OPERATIONAL) {
+        auto it = runtime_.slave_index.find(sc.name);
+        if (it == runtime_.slave_index.end()) continue;  // optional slave not present
+        if ((ec_slave[it->second].state & 0x0Fu) != EC_STATE_OPERATIONAL) {
             return false;
         }
     }
@@ -388,7 +446,9 @@ std::string EthercatMaster::formatStateError() const {
     std::ostringstream oss;
     oss << "Failed to reach OPERATIONAL for all configured slaves:\n";
     for (const auto& sc : config_.slaves) {
-        const int   soem_idx  = runtime_.slave_index.at(sc.name);
+        auto it = runtime_.slave_index.find(sc.name);
+        if (it == runtime_.slave_index.end()) continue;
+        const int   soem_idx  = it->second;
         const auto& sl        = ec_slave[soem_idx];
         oss << "  " << sc.name << " pos=" << sc.position
             << std::hex

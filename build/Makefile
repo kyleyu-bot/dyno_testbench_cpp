@@ -343,6 +343,19 @@ dyno2_integrated_test2/fast:
 	$(MAKE) $(MAKESILENT) -f src/tests/CMakeFiles/dyno2_integrated_test2.dir/build.make src/tests/CMakeFiles/dyno2_integrated_test2.dir/build
 .PHONY : dyno2_integrated_test2/fast
 
+#=============================================================================
+# Target rules for targets named bridge_udp
+
+# Build rule for target.
+bridge_udp: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 bridge_udp
+.PHONY : bridge_udp
+
+# fast build rule for target.
+bridge_udp/fast:
+	$(MAKE) $(MAKESILENT) -f src/interface_bridges/CMakeFiles/bridge_udp.dir/build.make src/interface_bridges/CMakeFiles/bridge_udp.dir/build
+.PHONY : bridge_udp/fast
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -355,6 +368,7 @@ help:
 	@echo "... install/strip"
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
+	@echo "... bridge_udp"
 	@echo "... drive_simple_speed_test1"
 	@echo "... drive_simple_speed_test2"
 	@echo "... dyno2_integrated_test1"

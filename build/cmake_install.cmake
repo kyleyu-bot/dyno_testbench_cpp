@@ -67,6 +67,11 @@ if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   include("/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/cmake_install.cmake")
 endif()
 
+if(NOT CMAKE_INSTALL_LOCAL_ONLY)
+  # Include the install script for the subdirectory.
+  include("/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/interface_bridges/cmake_install.cmake")
+endif()
+
 if(CMAKE_INSTALL_COMPONENT)
   set(CMAKE_INSTALL_MANIFEST "install_manifest_${CMAKE_INSTALL_COMPONENT}.txt")
 else()

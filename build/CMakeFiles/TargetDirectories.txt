@@ -66,3 +66,10 @@
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/install.dir
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/install/local.dir
 /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/tests/CMakeFiles/install/strip.dir
+/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/interface_bridges/CMakeFiles/bridge_udp.dir
+/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/interface_bridges/CMakeFiles/edit_cache.dir
+/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/interface_bridges/CMakeFiles/rebuild_cache.dir
+/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/interface_bridges/CMakeFiles/list_install_components.dir
+/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/interface_bridges/CMakeFiles/install.dir
+/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/interface_bridges/CMakeFiles/install/local.dir
+/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/src/interface_bridges/CMakeFiles/install/strip.dir
