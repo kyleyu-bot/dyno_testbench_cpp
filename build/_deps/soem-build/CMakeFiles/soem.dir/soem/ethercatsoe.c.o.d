@@ -22,14 +22,10 @@ _deps/soem-build/CMakeFiles/soem.dir/soem/ethercatsoe.c.o: \
  /usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h \
  /usr/include/x86_64-linux-gnu/bits/stdio_lim.h \
  /usr/include/x86_64-linux-gnu/bits/floatn.h \
- /usr/include/x86_64-linux-gnu/bits/floatn-common.h \
- /usr/include/x86_64-linux-gnu/bits/stdio.h \
- /usr/include/x86_64-linux-gnu/bits/stdio2.h /usr/include/string.h \
+ /usr/include/x86_64-linux-gnu/bits/floatn-common.h /usr/include/string.h \
  /usr/include/x86_64-linux-gnu/bits/types/locale_t.h \
  /usr/include/x86_64-linux-gnu/bits/types/__locale_t.h \
  /usr/include/strings.h \
- /usr/include/x86_64-linux-gnu/bits/strings_fortified.h \
- /usr/include/x86_64-linux-gnu/bits/string_fortified.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal/osal.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal/linux/osal_defs.h \
  /usr/include/pthread.h /usr/include/sched.h \

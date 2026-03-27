@@ -6,5 +6,5 @@ C_DEFINES =
 
 C_INCLUDES = -I/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/soem -I/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal -I/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal/linux -I/home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/oshw/linux
 
-C_FLAGS =  -Wall -Wextra -Werror -O2 -g -DNDEBUG
+C_FLAGS =  -Wall -Wextra -Werror -g
 

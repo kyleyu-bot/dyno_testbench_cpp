@@ -1,1 +1,1 @@
-/usr/bin/g++ -O2 -g -DNDEBUG CMakeFiles/elm3002_data_read.dir/elm3002_data_read.cpp.o -o elm3002_data_read  ../ethercat_core/libethercat_core.a ../../_deps/soem-build/libsoem.a -lpthread -lrt 
+/usr/bin/g++ -g CMakeFiles/elm3002_data_read.dir/elm3002_data_read.cpp.o -o elm3002_data_read  ../ethercat_core/libethercat_core.a ../../_deps/soem-build/libsoem.a -lpthread -lrt 

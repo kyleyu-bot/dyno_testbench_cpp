@@ -1,1 +1,1 @@
-/usr/bin/gcc  -Wall -Wextra -Werror -O2 -g -DNDEBUG -rdynamic CMakeFiles/simple_test.dir/simple_test.c.o -o simple_test  ../../../libsoem.a -lpthread -lrt 
+/usr/bin/gcc  -Wall -Wextra -Werror -g -rdynamic CMakeFiles/simple_test.dir/simple_test.c.o -o simple_test  ../../../libsoem.a -lpthread -lrt 

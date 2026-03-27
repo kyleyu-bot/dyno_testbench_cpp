@@ -1,1 +1,1 @@
-/usr/bin/g++ -O2 -g -DNDEBUG CMakeFiles/drive_simple_speed_test1.dir/drive_simple_speed_test1.cpp.o -o drive_simple_speed_test1  ../ethercat_core/libethercat_core.a ../../_deps/soem-build/libsoem.a -lpthread -lrt 
+/usr/bin/g++ -g CMakeFiles/drive_simple_speed_test1.dir/drive_simple_speed_test1.cpp.o -o drive_simple_speed_test1  ../ethercat_core/libethercat_core.a ../../_deps/soem-build/libsoem.a -lpthread -lrt 
