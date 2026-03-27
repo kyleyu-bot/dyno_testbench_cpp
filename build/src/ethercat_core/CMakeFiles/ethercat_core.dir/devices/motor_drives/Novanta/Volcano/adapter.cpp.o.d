@@ -1,8 +1,8 @@
 src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/motor_drives/Novanta/Volcano/adapter.cpp.o: \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.cpp \
  /usr/include/stdc-predef.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/base.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/base.hpp \
  /usr/include/c++/11/any /usr/include/c++/11/typeinfo \
  /usr/include/c++/11/bits/exception.h \
  /usr/include/x86_64-linux-gnu/c++/11/bits/c++config.h \
@@ -144,10 +144,10 @@ src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/motor_drives/Novanta/Volc
  /usr/include/c++/11/bits/stl_vector.h \
  /usr/include/c++/11/bits/stl_bvector.h \
  /usr/include/c++/11/bits/vector.tcc \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
  /usr/include/c++/11/unordered_map \
  /usr/include/c++/11/ext/aligned_buffer.h \
  /usr/include/c++/11/bits/hashtable.h \

@@ -1,8 +1,8 @@
 src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/beckhoff/el3002/adapter.cpp.o: \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el3002/adapter.cpp \
  /usr/include/stdc-predef.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el3002/adapter.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/base.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el3002/adapter.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/base.hpp \
  /usr/include/c++/11/any /usr/include/c++/11/typeinfo \
  /usr/include/c++/11/bits/exception.h \
  /usr/include/x86_64-linux-gnu/c++/11/bits/c++config.h \
@@ -144,7 +144,7 @@ src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/beckhoff/el3002/adapter.c
  /usr/include/c++/11/bits/stl_vector.h \
  /usr/include/c++/11/bits/stl_bvector.h \
  /usr/include/c++/11/bits/vector.tcc \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el3002/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el3002/data_types.hpp \
  /usr/include/c++/11/cstring /usr/include/string.h /usr/include/strings.h \
  /usr/include/c++/11/stdexcept /usr/include/c++/11/exception \
  /usr/include/c++/11/bits/exception_ptr.h \

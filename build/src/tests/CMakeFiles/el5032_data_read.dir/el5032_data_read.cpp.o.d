@@ -1,7 +1,7 @@
 src/tests/CMakeFiles/el5032_data_read.dir/el5032_data_read.cpp.o: \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/tests/el5032_data_read.cpp \
  /usr/include/stdc-predef.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/data_types.hpp \
  /usr/include/c++/11/any /usr/include/c++/11/typeinfo \
  /usr/include/c++/11/bits/exception.h \
  /usr/include/x86_64-linux-gnu/c++/11/bits/c++config.h \
@@ -149,9 +149,9 @@ src/tests/CMakeFiles/el5032_data_read.dir/el5032_data_read.cpp.o: \
  /usr/include/c++/11/bits/node_handle.h \
  /usr/include/c++/11/bits/unordered_map.h \
  /usr/include/c++/11/bits/erase_if.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/loop.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/master.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/base.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/loop.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/master.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/base.hpp \
  /usr/include/c++/11/vector /usr/include/c++/11/bits/stl_uninitialized.h \
  /usr/include/c++/11/bits/stl_vector.h \
  /usr/include/c++/11/bits/stl_bvector.h \
@@ -226,8 +226,8 @@ src/tests/CMakeFiles/el5032_data_read.dir/el5032_data_read.cpp.o: \
  /usr/include/c++/11/bits/this_thread_sleep.h \
  /usr/include/x86_64-linux-gnu/sys/time.h /usr/include/semaphore.h \
  /usr/include/x86_64-linux-gnu/bits/semaphore.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el5032/adapter.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el5032/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el5032/adapter.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el5032/data_types.hpp \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/soem/ethercat.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/soem/ethercattype.h \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/soem-src/osal/osal.h \

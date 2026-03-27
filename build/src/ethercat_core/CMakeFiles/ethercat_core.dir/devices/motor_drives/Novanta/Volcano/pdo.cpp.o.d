@@ -1,9 +1,9 @@
 src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/motor_drives/Novanta/Volcano/pdo.cpp.o: \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.cpp \
  /usr/include/stdc-predef.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
  /usr/include/c++/11/cstdint \
  /usr/include/x86_64-linux-gnu/c++/11/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/11/bits/os_defines.h \
@@ -24,7 +24,7 @@ src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/motor_drives/Novanta/Volc
  /usr/include/x86_64-linux-gnu/bits/wchar.h \
  /usr/include/x86_64-linux-gnu/bits/stdint-intn.h \
  /usr/include/x86_64-linux-gnu/bits/stdint-uintn.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
  /usr/include/c++/11/vector /usr/include/c++/11/bits/stl_algobase.h \
  /usr/include/c++/11/bits/functexcept.h \
  /usr/include/c++/11/bits/exception_defines.h \

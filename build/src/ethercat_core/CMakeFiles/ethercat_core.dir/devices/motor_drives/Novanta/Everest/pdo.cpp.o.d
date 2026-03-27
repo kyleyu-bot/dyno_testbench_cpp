@@ -1,9 +1,9 @@
 src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/motor_drives/Novanta/Everest/pdo.cpp.o: \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.cpp \
  /usr/include/stdc-predef.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Everest/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Everest/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
  /usr/include/c++/11/cstdint \
  /usr/include/x86_64-linux-gnu/c++/11/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/11/bits/os_defines.h \
@@ -97,7 +97,7 @@ src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/motor_drives/Novanta/Ever
  /usr/include/c++/11/bits/functional_hash.h \
  /usr/include/c++/11/bits/hash_bytes.h \
  /usr/include/c++/11/bits/vector.tcc \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
  /usr/include/c++/11/cstring /usr/include/string.h /usr/include/strings.h \
  /usr/include/c++/11/stdexcept /usr/include/c++/11/exception \
  /usr/include/c++/11/bits/exception_ptr.h \

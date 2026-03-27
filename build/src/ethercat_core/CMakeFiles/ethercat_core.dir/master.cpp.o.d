@@ -1,8 +1,8 @@
 src/ethercat_core/CMakeFiles/ethercat_core.dir/master.cpp.o: \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/master.cpp \
  /usr/include/stdc-predef.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/master.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/master.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/data_types.hpp \
  /usr/include/c++/11/any /usr/include/c++/11/typeinfo \
  /usr/include/c++/11/bits/exception.h \
  /usr/include/x86_64-linux-gnu/c++/11/bits/c++config.h \
@@ -150,7 +150,7 @@ src/ethercat_core/CMakeFiles/ethercat_core.dir/master.cpp.o: \
  /usr/include/c++/11/bits/node_handle.h \
  /usr/include/c++/11/bits/unordered_map.h \
  /usr/include/c++/11/bits/erase_if.h \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/base.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/base.hpp \
  /usr/include/c++/11/vector /usr/include/c++/11/bits/stl_uninitialized.h \
  /usr/include/c++/11/bits/stl_vector.h \
  /usr/include/c++/11/bits/stl_bvector.h \
@@ -334,20 +334,20 @@ src/ethercat_core/CMakeFiles/ethercat_core.dir/master.cpp.o: \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/nlohmann_json-src/include/nlohmann/ordered_map.hpp \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/nlohmann_json-src/include/nlohmann/detail/macro_unscope.hpp \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/build/_deps/nlohmann_json-src/include/nlohmann/thirdparty/hedley/hedley_undef.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el2004/adapter.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el2004/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el3002/adapter.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el3002/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el5032/adapter.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/beckhoff/el5032/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Everest/adapter.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Everest/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
- /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/include/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el2004/adapter.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el2004/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el3002/adapter.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el3002/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el5032/adapter.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/beckhoff/el5032/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Everest/adapter.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Everest/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
+ /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
  /usr/include/c++/11/fstream \
  /usr/include/x86_64-linux-gnu/c++/11/bits/basic_file.h \
  /usr/include/x86_64-linux-gnu/c++/11/bits/c++io.h \
