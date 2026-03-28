@@ -53,8 +53,16 @@ struct DriveStatus {
     float           measured_torque_nm          = 0.0f;
     float           measured_velocity_rad_s      = 0.0f;
     float           measured_position_rad        = 0.0f;
+    int32_t         output_encoder_pos           = 0;
     float           velocity_command_received    = 0.0f;
+    int32_t         position_setpoint            = 0;
     float           bus_voltage                  = 0.0f;
+    float           motor_temp                   = 0.0f;
+    float           iq_actual                    = 0.0f;
+    float           id_actual                    = 0.0f;
+    float           idc_actual                   = 0.0f;
+    float           iq_command                   = 0.0f;
+    float           id_command                   = 0.0f;
 
     int64_t         dc_time_error_ns  = 0;
     int64_t         cycle_time_ns     = 0;

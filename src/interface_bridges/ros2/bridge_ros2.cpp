@@ -383,12 +383,23 @@ int main(int argc, char** argv) {
         auto it = status.by_slave.find(slave_name);
         if (it != status.by_slave.end() && it->second.has_value()) {
             const auto& ds = std::any_cast<const DriveStatus&>(it->second);
-            j["state"]   = cia402Name(ds.cia402_state);
-            j["cmd_vel"] = cmd_vel;
-            j["fb_vel"]  = static_cast<int32_t>(ds.measured_velocity_rad_s);
-            j["mode"]    = static_cast<int>(ds.mode_of_operation_display);
-            j["sw"]      = ds.status_word;
-            j["err"]     = ds.error_code;
+            j["state"]            = cia402Name(ds.cia402_state);
+            j["cmd_vel"]          = cmd_vel;
+            j["fb_vel"]           = static_cast<int32_t>(ds.measured_velocity_rad_s);
+            j["mode"]             = static_cast<int>(ds.mode_of_operation_display);
+            j["sw"]               = ds.status_word;
+            j["err"]              = ds.error_code;
+            j["fb_pos"]           = ds.measured_position_rad;
+            j["out_enc_pos"]      = ds.output_encoder_pos;
+            j["pos_setpoint"]     = ds.position_setpoint;
+            j["fb_torque"]        = ds.measured_torque_nm;
+            j["bus_voltage"]      = ds.bus_voltage;
+            j["motor_temp"]       = ds.motor_temp;
+            j["iq_actual"]        = ds.iq_actual;
+            j["id_actual"]        = ds.id_actual;
+            j["idc_actual"]       = ds.idc_actual;
+            j["iq_command"]       = ds.iq_command;
+            j["id_command"]       = ds.id_command;
         } else {
             j["state"] = "unavailable";
         }
