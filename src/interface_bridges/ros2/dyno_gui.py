@@ -59,7 +59,7 @@ except ImportError:
 
 DEFAULT_BRIDGE   = "build/dyno_ros2_bridge/bridge_ros2"
 DEFAULT_TOPOLOGY = "config/topology.dyno2.template6.json"
-DEFAULT_PUB_HZ   = 20.0
+DEFAULT_PUB_HZ   = 200.0
 DEFAULT_FAULT_S  = 2.0
 SPEED_MAX        = 1000   # rad/s LSB slider range
 
@@ -143,7 +143,7 @@ class DynoWindow(QWidget):
         # Publish timer driven by Qt (mirrors ROS publish rate).
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._push_command)
-        self._timer.start(50)   # 20 Hz
+        self._timer.start(5)    # 200 Hz
 
     # ── UI construction ──────────────────────────────────────────────────────
 
@@ -323,7 +323,7 @@ class DynoWindow(QWidget):
 # Bridge subprocess management
 # ─────────────────────────────────────────────────────────────────────────────
 
-def launch_bridge(bridge_path: str, topology: str, fault_reset_s: float, debug: bool = False):
+def launch_bridge(bridge_path: str, topology: str, fault_reset_s: float, pub_hz: float, debug: bool = False):
     """Launch bridge_ros2 as a subprocess with sudo -E."""
     cmd = [
         "sudo", "-E",
@@ -331,6 +331,7 @@ def launch_bridge(bridge_path: str, topology: str, fault_reset_s: float, debug: 
         "--ros-args",
         "-p", f"topology:={topology}",
         "-p", f"fault_reset_s:={fault_reset_s}",
+        "-p", f"pub_hz:={pub_hz}",
     ]
     if debug:
         cmd += ["-p", "debug:=1"]
@@ -372,7 +373,7 @@ def main():
                   f"       Build it first:  bash src/interface_bridges/ros2/build.sh",
                   file=sys.stderr)
             sys.exit(1)
-        bridge_proc = launch_bridge(args.bridge, args.topology, args.fault_reset_s, args.debug)
+        bridge_proc = launch_bridge(args.bridge, args.topology, args.fault_reset_s, args.pub_hz, args.debug)
 
     # ── ROS2 init ────────────────────────────────────────────────────────────
     rclpy.init()

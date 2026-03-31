@@ -402,7 +402,7 @@ int main(int argc, char** argv) {
                     args.mode,
                     static_cast<int>(ds.mode_of_operation_display),
                     speed_cmd,
-                    static_cast<int>(ds.measured_velocity_rad_s),
+                    ds.measured_input_side_velocity_raw,
                     static_cast<double>(ds.velocity_command_received),
                     static_cast<double>(ds.bus_voltage),
                     static_cast<unsigned>(ds.status_word),

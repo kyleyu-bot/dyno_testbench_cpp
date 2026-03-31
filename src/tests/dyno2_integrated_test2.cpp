@@ -474,7 +474,7 @@ int main(int argc, char** argv) {
                         al.c_str(),
                         cia402Name(ds.cia402_state),
                         speed_cmd,
-                        static_cast<int>(ds.measured_velocity_rad_s),
+                        ds.measured_input_side_velocity_raw,
                         static_cast<int>(ds.mode_of_operation_display),
                         static_cast<unsigned>(ds.status_word),
                         static_cast<unsigned>(ds.error_code));

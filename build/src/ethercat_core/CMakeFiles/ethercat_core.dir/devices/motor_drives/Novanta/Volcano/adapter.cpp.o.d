@@ -148,6 +148,10 @@ src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/motor_drives/Novanta/Volc
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
  /home/dyno-nuc2/gitRepos/dyno_testbench_cpp/src/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
+ /usr/include/c++/11/stdexcept /usr/include/c++/11/exception \
+ /usr/include/c++/11/bits/exception_ptr.h \
+ /usr/include/c++/11/bits/cxxabi_init_exception.h \
+ /usr/include/c++/11/bits/nested_exception.h \
  /usr/include/c++/11/unordered_map \
  /usr/include/c++/11/ext/aligned_buffer.h \
  /usr/include/c++/11/bits/hashtable.h \

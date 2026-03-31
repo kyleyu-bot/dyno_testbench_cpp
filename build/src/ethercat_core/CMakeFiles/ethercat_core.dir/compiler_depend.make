@@ -750,6 +750,11 @@ src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/motor_drives/Novanta/Ever
   /usr/include/c++/11/bits/uses_allocator.h \
   /usr/include/c++/11/bits/invoke.h \
   ../src/ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp \
+  /usr/include/c++/11/stdexcept \
+  /usr/include/c++/11/exception \
+  /usr/include/c++/11/bits/exception_ptr.h \
+  /usr/include/c++/11/bits/cxxabi_init_exception.h \
+  /usr/include/c++/11/bits/nested_exception.h \
   /usr/include/c++/11/unordered_map \
   /usr/include/c++/11/ext/aligned_buffer.h \
   /usr/include/c++/11/bits/hashtable.h \
@@ -1125,6 +1130,11 @@ src/ethercat_core/CMakeFiles/ethercat_core.dir/devices/motor_drives/Novanta/Volc
   ../src/ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp \
   ../src/ethercat_core/devices/motor_drives/Novanta/Volcano/pdo.hpp \
   ../src/ethercat_core/devices/motor_drives/drive_bases/ds402/pdo.hpp \
+  /usr/include/c++/11/stdexcept \
+  /usr/include/c++/11/exception \
+  /usr/include/c++/11/bits/exception_ptr.h \
+  /usr/include/c++/11/bits/cxxabi_init_exception.h \
+  /usr/include/c++/11/bits/nested_exception.h \
   /usr/include/c++/11/unordered_map \
   /usr/include/c++/11/ext/aligned_buffer.h \
   /usr/include/c++/11/bits/hashtable.h \

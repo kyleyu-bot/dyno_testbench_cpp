@@ -35,6 +35,7 @@ std::unordered_map<std::string, SdoReadSpec> NovantaVolcanoAdapter::startupReadS
         {"position_loop_ki",       {.name="position_loop_ki",       .index=0x2512, .subindex=0x00, .data_type="f32"}},
         {"position_loop_kd",       {.name="position_loop_kd",       .index=0x2513, .subindex=0x00, .data_type="f32"}},
         {"motor_kt",               {.name="motor_kt",               .index=0x243B, .subindex=0x00, .data_type="f32"}},
+        {"sensor_ratio",           {.name="sensor_ratio",           .index=0x2364, .subindex=0x00, .data_type="f32"}},
     };
 }
 

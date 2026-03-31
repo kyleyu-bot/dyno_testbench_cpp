@@ -58,8 +58,9 @@ DriveStatus unpackStatus(
     uint16_t status_word    = 0;
     int8_t   mode_display   = 0;
     float    measured_torque_raw    = 0.0f;
-    float    measured_velocity_raw  = 0.0f;
-    float    measured_position_raw  = 0.0f;
+    int32_t  measured_input_side_velocity_raw = 0;
+    int32_t  measured_output_side_position_raw_cnt = 0;
+    int32_t  input_encoder_pos      = 0;
     float    received_velocity_raw  = 0.0f;
     float    bus_voltage            = 0.0f;
     uint16_t error_code             = 0;
@@ -73,8 +74,9 @@ DriveStatus unpackStatus(
         mode_display          = pdo.mode_display;
         error_code            = pdo.error_code;
         measured_torque_raw   = static_cast<float>(pdo.estimated_torque);
-        measured_velocity_raw = static_cast<float>(pdo.motor_velocity);
-        measured_position_raw = static_cast<float>(pdo.encoder_position);
+        measured_input_side_velocity_raw = pdo.motor_velocity;
+        measured_output_side_position_raw_cnt = pdo.measured_output_encoder_position_raw;
+        input_encoder_pos     = pdo.input_encoder_pos;
         received_velocity_raw = pdo.velocity_setpoint;
         bus_voltage           = pdo.bus_voltage;
         al_state_code         = (status_word != 0) ? AL_STATE_OPERATIONAL : 0u;
@@ -90,8 +92,8 @@ DriveStatus unpackStatus(
         std::memcpy(&pos_raw_i32,          data + 11, 4);
         std::memcpy(&al_state_code,        data + 15, 1);
         measured_torque_raw   = static_cast<float>(torque_raw_i16);
-        measured_velocity_raw = static_cast<float>(vel_raw_i32);
-        measured_position_raw = static_cast<float>(pos_raw_i32);
+        measured_input_side_velocity_raw = vel_raw_i32;
+        measured_output_side_position_raw_cnt = pos_raw_i32;
     }
 
     const Cia402State      cia_state  = decodeCia402State(status_word);
@@ -119,8 +121,9 @@ DriveStatus unpackStatus(
     s.remote                    = bits.remote;
     s.target_reached            = bits.target_reached;
     s.measured_torque_nm        = measured_torque_raw;
-    s.measured_velocity_rad_s   = measured_velocity_raw;
-    s.measured_position_rad     = measured_position_raw;
+    s.measured_input_side_velocity_raw       = measured_input_side_velocity_raw;
+    s.measured_output_side_position_raw_cnt  = measured_output_side_position_raw_cnt;
+    s.input_encoder_pos         = input_encoder_pos;
     s.velocity_command_received = received_velocity_raw;
     s.bus_voltage               = bus_voltage;
     s.dc_time_error_ns          = dc_error_ns;

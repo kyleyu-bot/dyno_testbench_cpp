@@ -429,6 +429,16 @@ void EthercatMaster::readStartupParams(
         }
         params[key] = val;
     }
+
+    // Compute gear ratio from sensor_ratio (0x2364).
+    auto sr_it = params.find("sensor_ratio");
+    if (sr_it != params.end()) {
+        if (auto* ea = dynamic_cast<novanta::everest::NovantaEverestAdapter*>(&adapter)) {
+            ea->computeGearRatio(sr_it->second);
+        } else if (auto* va = dynamic_cast<novanta::volcano::NovantaVolcanoAdapter*>(&adapter)) {
+            va->computeGearRatio(sr_it->second);
+        }
+    }
 }
 
 bool EthercatMaster::allSlavesInOp() const {

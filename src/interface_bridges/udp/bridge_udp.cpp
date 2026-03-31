@@ -385,7 +385,7 @@ int main(int argc, char** argv) {
                     const auto& ds = std::any_cast<const DriveStatus&>(it->second);
                     out.cia402_state  = cia402Name(ds.cia402_state);
                     out.cmd_velocity  = cmd_vel;
-                    out.fb_velocity   = static_cast<int32_t>(ds.measured_velocity_rad_s);
+                    out.fb_velocity   = ds.measured_input_side_velocity_raw;
                     out.mode_display  = static_cast<int>(ds.mode_of_operation_display);
                     out.status_word   = ds.status_word;
                     out.error_code    = ds.error_code;
