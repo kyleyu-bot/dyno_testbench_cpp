@@ -64,6 +64,9 @@ extern "C" {
 #include <memory>
 #include <mutex>
 #include <set>
+#include <pthread.h>
+#include <sched.h>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -86,7 +89,7 @@ static constexpr const char* DEFAULT_DUT_SLAVE     = "dut";
 static constexpr const char* DEFAULT_ENCODER_SLAVE = "encoder_interface";
 static constexpr const char* DEFAULT_TORQUE_SLAVE  = "analog_input_interface";
 static constexpr const char* DEFAULT_IO_SLAVE      = "digital_IO";
-static constexpr double      DEFAULT_PUB_HZ        = 20.0;
+static constexpr double      DEFAULT_PUB_HZ        = 200.0;
 static constexpr double      DEFAULT_FAULT_RESET   = 0.5;
 
 // ── Shared command state (written by ROS2 subscriber, read by main loop) ──────
@@ -98,6 +101,8 @@ struct CommandState {
     bool     dut_enable    = false;
     bool     fault_reset   = false;
     bool     hold_output1  = false;
+    int8_t   main_mode     = static_cast<int8_t>(ModeOfOperation::CYCLIC_SYNC_VELOCITY);
+    int8_t   dut_mode      = static_cast<int8_t>(ModeOfOperation::CYCLIC_SYNC_VELOCITY);
 };
 
 static std::mutex      g_cmd_mutex;
@@ -139,12 +144,14 @@ public:
                 try {
                     const json j = json::parse(msg->data);
                     std::lock_guard<std::mutex> lk(g_cmd_mutex);
-                    g_cmd_state.main_speed   = j.value("main_speed",   0);
-                    g_cmd_state.dut_speed    = j.value("dut_speed",    0);
+                    g_cmd_state.main_speed   = j.value("main_velocity", j.value("main_speed", 0));
+                    g_cmd_state.dut_speed    = j.value("dut_velocity",  j.value("dut_speed",  0));
                     g_cmd_state.main_enable  = j.value("main_enable",  false);
                     g_cmd_state.dut_enable   = j.value("dut_enable",   false);
                     g_cmd_state.fault_reset  = j.value("fault_reset",  false);
                     g_cmd_state.hold_output1 = j.value("hold_output1", false);
+                    g_cmd_state.main_mode    = static_cast<int8_t>(j.value("main_mode", static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
+                    g_cmd_state.dut_mode     = static_cast<int8_t>(j.value("dut_mode",  static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
                 } catch (...) {
                     RCLCPP_WARN(get_logger(), "Failed to parse /dyno/command JSON");
                 }
@@ -241,7 +248,8 @@ int main(int argc, char** argv) {
     const std::string io_slave      = get_str("io_slave",      DEFAULT_IO_SLAVE);
     const double      pub_hz        = get_dbl("pub_hz",        DEFAULT_PUB_HZ);
     const double      fault_reset_s = get_dbl("fault_reset_s", DEFAULT_FAULT_RESET);
-    const int         rt_priority   = get_int("rt_priority",   0);
+    const int         rt_priority   = get_int("rt_priority",   95);
+    const std::string cpu_affinity_str = get_str("cpu_affinity", "2");
     const bool        debug_print   = get_int("debug",         0) != 0;
 
     // EtherCAT init.
@@ -353,6 +361,18 @@ int main(int argc, char** argv) {
 
     LoopRtConfig rt_cfg;
     rt_cfg.rt_priority = std::clamp(rt_priority, 0, 99);
+    // Parse comma-separated CPU affinity list (e.g. "2" or "2,3").
+    if (!cpu_affinity_str.empty()) {
+        std::istringstream ss(cpu_affinity_str);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            try { rt_cfg.cpu_affinity.insert(std::stoi(token)); }
+            catch (...) {
+                RCLCPP_WARN(node->get_logger(),
+                    "Ignoring invalid cpu_affinity token: '%s'", token.c_str());
+            }
+        }
+    }
 
     // Use sigaction instead of std::signal so we reliably override the handler
     // that rclcpp::init() installs via sigaction for SIGINT.
@@ -365,6 +385,26 @@ int main(int argc, char** argv) {
 
     EthercatLoop loop(*rt, cfg.cycle_hz, rt_cfg);
     loop.start();
+
+    // Pin the main thread (publish/command loop) to all CPUs except the ones
+    // reserved for the EtherCAT RT loop, so they never compete on the same core.
+    {
+        const int ncpus = static_cast<int>(std::thread::hardware_concurrency());
+        cpu_set_t main_cpuset;
+        CPU_ZERO(&main_cpuset);
+        for (int i = 0; i < ncpus; ++i) {
+            if (rt_cfg.cpu_affinity.find(i) == rt_cfg.cpu_affinity.end())
+                CPU_SET(i, &main_cpuset);
+        }
+        if (pthread_setaffinity_np(pthread_self(), sizeof(main_cpuset), &main_cpuset) != 0) {
+            RCLCPP_WARN(node->get_logger(),
+                "Failed to set main thread CPU affinity (errno=%d). "
+                "Main loop may share CPU with EtherCAT thread.", errno);
+        } else {
+            RCLCPP_INFO(node->get_logger(),
+                "Main thread pinned to all CPUs except RT core(s).");
+        }
+    }
 
     RCLCPP_INFO(node->get_logger(),
         "bridge_ros2 running | pub_hz=%.1f fault_reset=%.1fs", pub_hz, fault_reset_s);
@@ -383,12 +423,23 @@ int main(int argc, char** argv) {
         auto it = status.by_slave.find(slave_name);
         if (it != status.by_slave.end() && it->second.has_value()) {
             const auto& ds = std::any_cast<const DriveStatus&>(it->second);
-            j["state"]   = cia402Name(ds.cia402_state);
-            j["cmd_vel"] = cmd_vel;
-            j["fb_vel"]  = static_cast<int32_t>(ds.measured_velocity_rad_s);
-            j["mode"]    = static_cast<int>(ds.mode_of_operation_display);
-            j["sw"]      = ds.status_word;
-            j["err"]     = ds.error_code;
+            j["state"]            = cia402Name(ds.cia402_state);
+            j["cmd_vel"]          = cmd_vel;
+            j["fb_vel"]           = ds.measured_input_side_velocity_raw;
+            j["mode"]             = static_cast<int>(ds.mode_of_operation_display);
+            j["sw"]               = ds.status_word;
+            j["err"]              = ds.error_code;
+            j["output_pos"]       = ds.measured_output_side_position_raw_cnt;
+            j["in_enc_pos"]       = ds.input_encoder_pos;
+            j["pos_setpoint"]     = ds.position_setpoint;
+            j["fb_torque"]        = ds.measured_torque_nm;
+            j["bus_voltage"]      = ds.bus_voltage;
+            j["motor_temp"]       = ds.motor_temp;
+            j["iq_actual"]        = ds.iq_actual;
+            j["id_actual"]        = ds.id_actual;
+            j["idc_actual"]       = ds.idc_actual;
+            j["iq_command"]       = ds.iq_command;
+            j["id_command"]       = ds.id_command;
         } else {
             j["state"] = "unavailable";
         }
@@ -415,7 +466,7 @@ int main(int argc, char** argv) {
 
         // Build EtherCAT commands.
         Command main_cmd;
-        main_cmd.mode_of_operation      = ModeOfOperation::CYCLIC_SYNC_VELOCITY;
+        main_cmd.mode_of_operation      = static_cast<ModeOfOperation>(cmd.main_mode);
         main_cmd.target_velocity_rad_s  = static_cast<float>(cmd.main_speed);
         main_cmd.enable_drive           = !in_reset && cmd.main_enable;
         main_cmd.clear_fault            = in_reset || cmd.fault_reset;
@@ -430,7 +481,7 @@ int main(int argc, char** argv) {
         main_cmd.position_loop_kd       = main_gains.position_loop_kd;
 
         Command dut_cmd;
-        dut_cmd.mode_of_operation      = ModeOfOperation::CYCLIC_SYNC_VELOCITY;
+        dut_cmd.mode_of_operation      = static_cast<ModeOfOperation>(cmd.dut_mode);
         dut_cmd.target_velocity_rad_s  = static_cast<float>(cmd.dut_speed);
         dut_cmd.enable_drive           = !in_reset && cmd.dut_enable;
         dut_cmd.clear_fault            = in_reset || cmd.fault_reset;
@@ -502,7 +553,7 @@ int main(int argc, char** argv) {
                         alStateName(static_cast<int>(ec_slave[drive_soem_idx].state)).c_str(),
                         cia402Name(ds.cia402_state),
                         cmd.main_speed,
-                        static_cast<int>(ds.measured_velocity_rad_s),
+                        ds.measured_input_side_velocity_raw,
                         static_cast<int>(ds.mode_of_operation_display),
                         static_cast<unsigned>(ds.status_word),
                         static_cast<unsigned>(ds.error_code),
@@ -528,7 +579,7 @@ int main(int argc, char** argv) {
                         alStateName(dut_present ? static_cast<int>(ec_slave[dut_soem_idx].state) : 0).c_str(),
                         cia402Name(ds.cia402_state),
                         cmd.dut_speed,
-                        static_cast<int>(ds.measured_velocity_rad_s),
+                        ds.measured_input_side_velocity_raw,
                         static_cast<int>(ds.mode_of_operation_display),
                         static_cast<unsigned>(ds.status_word),
                         static_cast<unsigned>(ds.error_code),

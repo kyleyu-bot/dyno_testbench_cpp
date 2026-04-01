@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 """
-Dyno Qt GUI — launches bridge_ros2 and provides drive control.
+Dyno Qt GUI — drag-and-drop command slider assignment.
 
-Usage (from repo root, after sourcing ROS2 and env_setup):
-    python3 src/interface_bridges/ros2/dyno_gui.py [options]
+Usage (from repo root):
+    bash src/interface_bridges/ros2/run_gui.sh [options]
 
 Options:
     --bridge   <path>     Path to bridge_ros2 binary
                           (default: build/dyno_ros2_bridge/bridge_ros2)
     --topology <path>     Topology JSON passed to bridge_ros2
                           (default: config/topology.dyno2.template6.json)
-    --pub-hz   <float>    ROS2 publish rate for /dyno/command (default: 20)
-    --no-bridge           Don't launch bridge_ros2 (connect to an already-running bridge)
+    --pub-hz   <float>    ROS2 publish rate Hz (default: 200)
+    --no-bridge           Don't launch bridge_ros2 (connect to already-running bridge)
     --fault-reset-s <s>   fault_reset_s passed to bridge_ros2 (default: 2.0)
+    --debug               Pass debug:=1 to bridge_ros2
 
 Controls:
-    Main speed slider  →  main_speed  (rad/s LSB)
-    DUT  speed slider  →  dut_speed
-    Main Enable button →  main_enable (toggle)
-    DUT  Enable button →  dut_enable  (toggle)
-    Fault Reset button →  momentary fault_reset pulse
+    Drag a field from the left panel onto a slider slot to assign it.
+    Right-click a slot to unassign.
+    Main Enable / DUT Enable  — toggle drive enable
+    Main Zero  / DUT Zero     — zero all four command types for that drive
+    Fault Reset               — one-shot fault clear pulse
 """
 
 import argparse
@@ -31,37 +32,66 @@ import sys
 import threading
 import time
 
-# ── Qt ──────────────────────────────────────────────────────────────────────
+# ── Qt ────────────────────────────────────────────────────────────────────────
 try:
-    from PyQt5.QtCore    import Qt, QTimer
+    from PyQt5.QtCore    import Qt, QTimer, QMimeData, QByteArray
     from PyQt5.QtWidgets import (
-        QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+        QApplication, QMainWindow, QWidget,
+        QVBoxLayout, QHBoxLayout, QSplitter,
         QSlider, QPushButton, QLabel, QGroupBox,
-        QSpinBox,
+        QSpinBox, QListWidget, QListWidgetItem,
+        QMenu, QAction, QComboBox,
     )
 except ImportError:
-    print("ERROR: PyQt5 not found.  Install with:  pip install PyQt5", file=sys.stderr)
+    print("ERROR: PyQt5 not found.  pip install PyQt5", file=sys.stderr)
     sys.exit(1)
 
-# ── ROS2 ────────────────────────────────────────────────────────────────────
+# ── ROS2 ─────────────────────────────────────────────────────────────────────
 try:
     import rclpy
-    from rclpy.node          import Node
-    from std_msgs.msg        import String as StringMsg
+    from rclpy.node   import Node
+    from std_msgs.msg import String as StringMsg
 except ImportError:
-    print("ERROR: rclpy not found.  Source ROS2:  source /opt/ros/humble/setup.bash",
-          file=sys.stderr)
+    print("ERROR: rclpy not found.  source /opt/ros/humble/setup.bash", file=sys.stderr)
     sys.exit(1)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Defaults
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 
 DEFAULT_BRIDGE   = "build/dyno_ros2_bridge/bridge_ros2"
 DEFAULT_TOPOLOGY = "config/topology.dyno2.template6.json"
-DEFAULT_PUB_HZ   = 20.0
+DEFAULT_PUB_HZ   = 200.0
 DEFAULT_FAULT_S  = 2.0
-SPEED_MAX        = 1000   # rad/s LSB slider range
+
+CMD_MIME  = "application/x-dyno-command-field"
+NUM_SLOTS = 4   # number of slider slots shown
+
+# All drag-assignable command fields: (json_key, display_label)
+COMMAND_FIELDS = [
+    ("main_velocity", "Main Velocity"),
+    ("main_position", "Main Position"),
+    ("main_torque",   "Main Torque"),
+    ("main_current",  "Main Current"),
+    ("dut_velocity",  "DUT Velocity"),
+    ("dut_position",  "DUT Position"),
+    ("dut_torque",    "DUT Torque"),
+    ("dut_current",   "DUT Current"),
+]
+
+# DS402 modes of operation: (display label, int value sent in JSON)
+DS402_MODES = [
+    ("No Mode (0)",                  0),
+    ("Profile Position (1)",         1),
+    ("Profile Velocity (2)",         2),
+    ("Profile Torque (4)",           4),
+    ("Cyclic Sync Position (8)",     8),
+    ("Cyclic Sync Velocity (9)",     9),
+    ("Cyclic Sync Torque (10)",     10),
+]
+DS402_DEFAULT_MODE = 9   # Cyclic Sync Velocity
+
+MAIN_ZERO_FIELDS = ["main_velocity", "main_position", "main_torque", "main_current"]
+DUT_ZERO_FIELDS  = ["dut_velocity",  "dut_position",  "dut_torque",  "dut_current"]
+ALL_CMD_KEYS     = [k for k, _ in COMMAND_FIELDS]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,50 +105,47 @@ class DynoCommander(Node):
         super().__init__("dyno_gui_commander")
         self._pub = self.create_publisher(StringMsg, "/dyno/command", 10)
 
-        # Shared command state — written by GUI thread, read by ROS timer.
-        self._lock        = threading.Lock()
-        self._main_speed  = 0
-        self._dut_speed   = 0
-        self._main_enable = False
-        self._dut_enable  = False
-        self._fault_reset = False
+        self._lock         = threading.Lock()
+        self._numeric      = {k: 0 for k in ALL_CMD_KEYS}
+        self._main_enable  = False
+        self._dut_enable   = False
+        self._fault_reset  = False
         self._hold_output1 = False
+        self._main_mode    = DS402_DEFAULT_MODE
+        self._dut_mode     = DS402_DEFAULT_MODE
 
         period = 1.0 / max(pub_hz, 1.0)
         self.create_timer(period, self._publish)
 
-    # ── called by GUI thread ─────────────────────────────────────────────────
-
-    def set_command(self, main_speed: int, dut_speed: int,
+    def set_command(self, numeric: dict,
                     main_enable: bool, dut_enable: bool,
-                    fault_reset: bool = False, hold_output1: bool = False):
+                    fault_reset: bool = False, hold_output1: bool = False,
+                    main_mode: int = DS402_DEFAULT_MODE,
+                    dut_mode:  int = DS402_DEFAULT_MODE):
         with self._lock:
-            self._main_speed   = main_speed
-            self._dut_speed    = dut_speed
+            self._numeric.update(numeric)
             self._main_enable  = main_enable
             self._dut_enable   = dut_enable
             self._fault_reset  = fault_reset
             self._hold_output1 = hold_output1
+            self._main_mode    = main_mode
+            self._dut_mode     = dut_mode
 
     def pulse_fault_reset(self):
         """Send fault_reset=true for one publish cycle."""
         with self._lock:
             self._fault_reset = True
 
-    # ── ROS timer callback ───────────────────────────────────────────────────
-
     def _publish(self):
         with self._lock:
-            payload = {
-                "main_speed":    self._main_speed,
-                "dut_speed":     self._dut_speed,
-                "main_enable":   self._main_enable,
-                "dut_enable":    self._dut_enable,
-                "fault_reset":   self._fault_reset,
-                "hold_output1":  self._hold_output1,
-            }
-            # fault_reset is a one-shot pulse — clear after publishing.
-            self._fault_reset = False
+            payload = dict(self._numeric)
+            payload["main_enable"]  = self._main_enable
+            payload["dut_enable"]   = self._dut_enable
+            payload["fault_reset"]  = self._fault_reset
+            payload["hold_output1"] = self._hold_output1
+            payload["main_mode"]    = self._main_mode
+            payload["dut_mode"]     = self._dut_mode
+            self._fault_reset = False   # one-shot pulse
 
         msg      = StringMsg()
         msg.data = json.dumps(payload)
@@ -126,193 +153,341 @@ class DynoCommander(Node):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Command field list (drag source)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CommandFieldList(QListWidget):
+    """Static list of assignable command fields — drag onto a SliderSlot."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QListWidget.DragOnly)
+        self.setMaximumWidth(150)
+        self.setMinimumWidth(110)
+
+        for key, label in COMMAND_FIELDS:
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, key)
+            self.addItem(item)
+
+    def mimeData(self, items):
+        mime = QMimeData()
+        if items:
+            key = items[0].data(Qt.UserRole) or ""
+            mime.setData(CMD_MIME, QByteArray(key.encode()))
+        return mime
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Slider slot (drop target)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SliderSlot(QGroupBox):
+    """
+    Generic vertical slider, initially unassigned.
+    Drop a command field from CommandFieldList to assign what it controls.
+    Right-click to unassign.
+    """
+
+    _PLACEHOLDER = "— drop field here —"
+
+    def __init__(self, parent=None):
+        super().__init__(SliderSlot._PLACEHOLDER, parent)
+        self._field: str | None = None
+        self.setAcceptDrops(True)
+        self.setMinimumWidth(110)
+
+        # Max spinbox
+        self._max_spin = QSpinBox()
+        self._max_spin.setRange(-1_000_000, 1_000_000)
+        self._max_spin.setValue(1000)
+        self._max_spin.setPrefix("Max: ")
+
+        # Vertical slider
+        self._slider = QSlider(Qt.Vertical)
+        self._slider.setRange(-1000, 1000)
+        self._slider.setValue(0)
+        self._slider.setTickInterval(500)
+        self._slider.setTickPosition(QSlider.TicksRight)
+        self._slider.setMinimumHeight(180)
+
+        # Min spinbox
+        self._min_spin = QSpinBox()
+        self._min_spin.setRange(-1_000_000, 1_000_000)
+        self._min_spin.setValue(-1000)
+        self._min_spin.setPrefix("Min: ")
+
+        # Exact entry spinbox
+        self._exact_spin = QSpinBox()
+        self._exact_spin.setRange(-1000, 1000)
+        self._exact_spin.setValue(0)
+
+        # Value display
+        self._val_label = QLabel("0")
+        self._val_label.setAlignment(Qt.AlignCenter)
+
+        col = QVBoxLayout(self)
+        col.addWidget(self._max_spin)
+        col.addWidget(self._slider, 1, Qt.AlignHCenter)
+        col.addWidget(self._min_spin)
+        col.addWidget(QLabel("Exact:"))
+        col.addWidget(self._exact_spin)
+        col.addWidget(self._val_label)
+
+        # Signal wiring
+        self._max_spin.valueChanged.connect(self._on_max_changed)
+        self._min_spin.valueChanged.connect(self._on_min_changed)
+        self._slider.valueChanged.connect(self._on_slider_moved)
+        self._exact_spin.valueChanged.connect(self._on_exact_changed)
+
+        self._set_controls_enabled(False)
+
+    # ── range changes ─────────────────────────────────────────────────────────
+
+    def _on_max_changed(self, v: int):
+        if v < self._min_spin.value():
+            self._min_spin.blockSignals(True)
+            self._min_spin.setValue(v)
+            self._min_spin.blockSignals(False)
+        self._slider.setMaximum(v)
+        self._exact_spin.setMaximum(v)
+
+    def _on_min_changed(self, v: int):
+        if v > self._max_spin.value():
+            self._max_spin.blockSignals(True)
+            self._max_spin.setValue(v)
+            self._max_spin.blockSignals(False)
+        self._slider.setMinimum(v)
+        self._exact_spin.setMinimum(v)
+
+    # ── value sync ────────────────────────────────────────────────────────────
+
+    def _on_slider_moved(self, v: int):
+        self._val_label.setText(str(v))
+        self._exact_spin.blockSignals(True)
+        self._exact_spin.setValue(v)
+        self._exact_spin.blockSignals(False)
+
+    def _on_exact_changed(self, v: int):
+        self._slider.blockSignals(True)
+        self._slider.setValue(v)
+        self._slider.blockSignals(False)
+        self._val_label.setText(str(v))
+
+    # ── drag / drop ───────────────────────────────────────────────────────────
+
+    def dragEnterEvent(self, ev):
+        if ev.mimeData().hasFormat(CMD_MIME):
+            ev.acceptProposedAction()
+        else:
+            ev.ignore()
+
+    def dragMoveEvent(self, ev):
+        ev.acceptProposedAction()
+
+    def dropEvent(self, ev):
+        key = bytes(ev.mimeData().data(CMD_MIME)).decode()
+        self._assign(key)
+        ev.acceptProposedAction()
+
+    def contextMenuEvent(self, ev):
+        if self._field is None:
+            return
+        menu = QMenu(self)
+        act  = QAction("Unassign", self)
+        act.triggered.connect(self._unassign)
+        menu.addAction(act)
+        menu.exec_(ev.globalPos())
+
+    # ── assignment ────────────────────────────────────────────────────────────
+
+    def _assign(self, key: str):
+        self._field = key
+        label = next((l for k, l in COMMAND_FIELDS if k == key), key)
+        self.setTitle(label)
+        self._set_controls_enabled(True)
+
+    def _unassign(self):
+        self._field = None
+        self.setTitle(SliderSlot._PLACEHOLDER)
+        self._slider.setValue(0)
+        self._set_controls_enabled(False)
+
+    def _set_controls_enabled(self, enabled: bool):
+        self._slider.setEnabled(enabled)
+        self._max_spin.setEnabled(enabled)
+        self._min_spin.setEnabled(enabled)
+        self._exact_spin.setEnabled(enabled)
+
+    # ── public API ────────────────────────────────────────────────────────────
+
+    @property
+    def field(self) -> str | None:
+        return self._field
+
+    @property
+    def value(self) -> int:
+        return self._slider.value()
+
+    def zero(self):
+        self._slider.setValue(0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Qt main window
 # ─────────────────────────────────────────────────────────────────────────────
 
-class DynoWindow(QWidget):
+class DynoWindow(QMainWindow):
 
     def __init__(self, commander: DynoCommander):
         super().__init__()
-        self._cmd = commander
-        self._main_enabled  = False
-        self._dut_enabled   = False
-        self._hold_output1  = False
-        self._build_ui()
-        self.setWindowTitle("Dyno Control")
+        self._cmd          = commander
+        self._main_enabled = False
+        self._dut_enabled  = False
+        self._hold_output1 = False
 
-        # Publish timer driven by Qt (mirrors ROS publish rate).
+        self.setWindowTitle("Dyno Control")
+        self._build_ui()
+
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._push_command)
-        self._timer.start(50)   # 20 Hz
-
-    # ── UI construction ──────────────────────────────────────────────────────
+        self._timer.start(5)   # 200 Hz
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        # ── Left: command field list ───────────────────────────────────────────
+        self._field_list = CommandFieldList()
 
-        drives_row = QHBoxLayout()
+        # ── Centre: slider slots ───────────────────────────────────────────────
+        self._slots = [SliderSlot() for _ in range(NUM_SLOTS)]
+        slots_w   = QWidget()
+        slots_lay = QHBoxLayout(slots_w)
+        slots_lay.setSpacing(6)
+        for slot in self._slots:
+            slots_lay.addWidget(slot)
 
-        # ── Main drive ───────────────────────────────────────────────────────
-        drives_row.addWidget(self._make_drive_group(
-            label         = "Main Drive",
-            attr_speed    = "_main_speed_slider",
-            attr_spinbox  = "_main_speed_spin",
-            attr_label    = "_main_speed_label",
-            attr_btn      = "_main_enable_btn",
-            attr_min_spin = "_main_min_spin",
-            attr_max_spin = "_main_max_spin",
-            on_enable     = self._toggle_main,
-        ))
+        # ── Right: hardcoded buttons ───────────────────────────────────────────
+        btn_w   = QWidget()
+        btn_lay = QVBoxLayout(btn_w)
+        btn_lay.setSpacing(8)
+        btn_w.setFixedWidth(130)
 
-        # ── DUT drive ────────────────────────────────────────────────────────
-        drives_row.addWidget(self._make_drive_group(
-            label         = "DUT Drive",
-            attr_speed    = "_dut_speed_slider",
-            attr_spinbox  = "_dut_speed_spin",
-            attr_label    = "_dut_speed_label",
-            attr_btn      = "_dut_enable_btn",
-            attr_min_spin = "_dut_min_spin",
-            attr_max_spin = "_dut_max_spin",
-            on_enable     = self._toggle_dut,
-        ))
+        self._main_enable_btn = QPushButton("Main Enable")
+        self._main_enable_btn.setCheckable(True)
+        self._main_enable_btn.setStyleSheet(
+            "QPushButton:checked { background-color: #44cc44; font-weight: bold; }")
+        self._main_enable_btn.clicked.connect(self._toggle_main)
 
-        root.addLayout(drives_row)
+        main_zero_btn = QPushButton("Main Zero")
+        main_zero_btn.clicked.connect(self._main_zero)
 
-        # ── Output / Fault row ───────────────────────────────────────────────
-        btn_row = QHBoxLayout()
+        self._main_mode_combo = QComboBox()
+        for label, _ in DS402_MODES:
+            self._main_mode_combo.addItem(label)
+        self._main_mode_combo.setCurrentIndex(
+            next(i for i, (_, v) in enumerate(DS402_MODES) if v == DS402_DEFAULT_MODE))
+
+        self._dut_enable_btn = QPushButton("DUT Enable")
+        self._dut_enable_btn.setCheckable(True)
+        self._dut_enable_btn.setStyleSheet(
+            "QPushButton:checked { background-color: #44cc44; font-weight: bold; }")
+        self._dut_enable_btn.clicked.connect(self._toggle_dut)
+
+        dut_zero_btn = QPushButton("DUT Zero")
+        dut_zero_btn.clicked.connect(self._dut_zero)
+
+        self._dut_mode_combo = QComboBox()
+        for label, _ in DS402_MODES:
+            self._dut_mode_combo.addItem(label)
+        self._dut_mode_combo.setCurrentIndex(
+            next(i for i, (_, v) in enumerate(DS402_MODES) if v == DS402_DEFAULT_MODE))
 
         self._output1_btn = QPushButton("Hold Output 1")
         self._output1_btn.setCheckable(True)
         self._output1_btn.setStyleSheet(
             "QPushButton:checked { background-color: #44aaff; font-weight: bold; }")
         self._output1_btn.clicked.connect(self._toggle_output1)
-        btn_row.addWidget(self._output1_btn)
 
         fault_btn = QPushButton("Fault Reset")
         fault_btn.setStyleSheet("background-color: #f0a000; font-weight: bold;")
-        fault_btn.clicked.connect(self._fault_reset)
-        btn_row.addWidget(fault_btn)
+        fault_btn.clicked.connect(self._cmd.pulse_fault_reset)
 
-        root.addLayout(btn_row)
+        btn_lay.addWidget(self._main_enable_btn)
+        btn_lay.addWidget(main_zero_btn)
+        btn_lay.addWidget(QLabel("Main Mode:"))
+        btn_lay.addWidget(self._main_mode_combo)
+        btn_lay.addSpacing(12)
+        btn_lay.addWidget(self._dut_enable_btn)
+        btn_lay.addWidget(dut_zero_btn)
+        btn_lay.addWidget(QLabel("DUT Mode:"))
+        btn_lay.addWidget(self._dut_mode_combo)
+        btn_lay.addSpacing(12)
+        btn_lay.addWidget(self._output1_btn)
+        btn_lay.addWidget(fault_btn)
+        btn_lay.addStretch()
 
-        # ── Status label ─────────────────────────────────────────────────────
+        # ── Splitter ───────────────────────────────────────────────────────────
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(self._field_list)
+        splitter.addWidget(slots_w)
+        splitter.addWidget(btn_w)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+
+        # ── Status label ───────────────────────────────────────────────────────
         self._status_label = QLabel("bridge_ros2 starting…")
         self._status_label.setAlignment(Qt.AlignCenter)
-        root.addWidget(self._status_label)
 
-    def _make_drive_group(self, label, attr_speed, attr_spinbox,
-                          attr_label, attr_btn, attr_min_spin, attr_max_spin,
-                          on_enable):
-        grp   = QGroupBox(label)
-        outer = QHBoxLayout(grp)
+        # ── Central widget ─────────────────────────────────────────────────────
+        central = QWidget()
+        vlay    = QVBoxLayout(central)
+        vlay.addWidget(splitter, 1)
+        vlay.addWidget(self._status_label)
+        self.setCentralWidget(central)
 
-        # ── Left column: max spinbox / vertical slider / min spinbox ─────────
-        slider_col = QVBoxLayout()
-
-        max_spin = QSpinBox()
-        max_spin.setMinimum(-SPEED_MAX)
-        max_spin.setMaximum( SPEED_MAX)
-        max_spin.setValue(SPEED_MAX)
-        max_spin.setPrefix("Max: ")
-        setattr(self, attr_max_spin, max_spin)
-        slider_col.addWidget(max_spin)
-
-        slider = QSlider(Qt.Vertical)
-        slider.setMinimum(-SPEED_MAX)
-        slider.setMaximum( SPEED_MAX)
-        slider.setValue(0)
-        slider.setTickInterval(SPEED_MAX // 4)
-        slider.setTickPosition(QSlider.TicksRight)
-        slider.setMinimumHeight(180)
-        setattr(self, attr_speed, slider)
-        slider_col.addWidget(slider, alignment=Qt.AlignHCenter)
-
-        min_spin = QSpinBox()
-        min_spin.setMinimum(-SPEED_MAX)
-        min_spin.setMaximum( SPEED_MAX)
-        min_spin.setValue(-SPEED_MAX)
-        min_spin.setPrefix("Min: ")
-        setattr(self, attr_min_spin, min_spin)
-        slider_col.addWidget(min_spin)
-
-        outer.addLayout(slider_col)
-
-        # ── Right column: value label / exact entry / buttons ─────────────────
-        ctrl_col = QVBoxLayout()
-
-        speed_lbl = QLabel("Speed (LSB):\n0")
-        speed_lbl.setAlignment(Qt.AlignCenter)
-        setattr(self, attr_label, speed_lbl)
-        ctrl_col.addWidget(speed_lbl)
-
-        ctrl_col.addWidget(QLabel("Exact:"))
-        spinbox = QSpinBox()
-        spinbox.setMinimum(-SPEED_MAX)
-        spinbox.setMaximum( SPEED_MAX)
-        spinbox.setValue(0)
-        setattr(self, attr_spinbox, spinbox)
-        ctrl_col.addWidget(spinbox)
-
-        ctrl_col.addStretch()
-
-        enable_btn = QPushButton("Enable")
-        enable_btn.setCheckable(True)
-        enable_btn.setStyleSheet(
-            "QPushButton:checked { background-color: #44cc44; font-weight: bold; }")
-        enable_btn.clicked.connect(on_enable)
-        setattr(self, attr_btn, enable_btn)
-        ctrl_col.addWidget(enable_btn)
-
-        zero_btn = QPushButton("Zero")
-        zero_btn.clicked.connect(lambda: slider.setValue(0))
-        ctrl_col.addWidget(zero_btn)
-
-        outer.addLayout(ctrl_col)
-
-        # ── Signal wiring ─────────────────────────────────────────────────────
-        max_spin.valueChanged.connect(lambda v: (
-            slider.setMaximum(v), spinbox.setMaximum(v)))
-        min_spin.valueChanged.connect(lambda v: (
-            slider.setMinimum(v), spinbox.setMinimum(v)))
-
-        spinbox.valueChanged.connect(
-            lambda v: (slider.blockSignals(True), slider.setValue(v),
-                       slider.blockSignals(False)))
-        slider.valueChanged.connect(lambda v: (
-            speed_lbl.setText(f"Speed (LSB):\n{v}"),
-            spinbox.blockSignals(True),
-            spinbox.setValue(v),
-            spinbox.blockSignals(False),
-        ))
-
-        return grp
-
-    # ── Slot helpers ─────────────────────────────────────────────────────────
+    # ── button callbacks ──────────────────────────────────────────────────────
 
     def _toggle_main(self):
         self._main_enabled = self._main_enable_btn.isChecked()
-        self._main_enable_btn.setText("Enabled" if self._main_enabled else "Enable")
+        self._main_enable_btn.setText(
+            "Main Enabled" if self._main_enabled else "Main Enable")
 
     def _toggle_dut(self):
         self._dut_enabled = self._dut_enable_btn.isChecked()
-        self._dut_enable_btn.setText("Enabled" if self._dut_enabled else "Enable")
+        self._dut_enable_btn.setText(
+            "DUT Enabled" if self._dut_enabled else "DUT Enable")
 
     def _toggle_output1(self):
         self._hold_output1 = self._output1_btn.isChecked()
-        self._output1_btn.setText("Output 1 ON" if self._hold_output1 else "Hold Output 1")
+        self._output1_btn.setText(
+            "Output 1 ON" if self._hold_output1 else "Hold Output 1")
 
-    def _fault_reset(self):
-        self._cmd.pulse_fault_reset()
+    def _main_zero(self):
+        for slot in self._slots:
+            if slot.field in MAIN_ZERO_FIELDS:
+                slot.zero()
 
-    # ── Timer: push current state to ROS2 commander ──────────────────────────
+    def _dut_zero(self):
+        for slot in self._slots:
+            if slot.field in DUT_ZERO_FIELDS:
+                slot.zero()
+
+    # ── publish ───────────────────────────────────────────────────────────────
 
     def _push_command(self):
+        # Start with all command fields at zero; overwrite with assigned slots.
+        numeric = {k: 0 for k in ALL_CMD_KEYS}
+        for slot in self._slots:
+            if slot.field is not None:
+                numeric[slot.field] = slot.value
         self._cmd.set_command(
-            main_speed   = self._main_speed_slider.value(),
-            dut_speed    = self._dut_speed_slider.value(),
+            numeric      = numeric,
             main_enable  = self._main_enabled,
             dut_enable   = self._dut_enabled,
             hold_output1 = self._hold_output1,
+            main_mode    = DS402_MODES[self._main_mode_combo.currentIndex()][1],
+            dut_mode     = DS402_MODES[self._dut_mode_combo.currentIndex()][1],
         )
 
     def set_status(self, text: str):
@@ -323,7 +498,8 @@ class DynoWindow(QWidget):
 # Bridge subprocess management
 # ─────────────────────────────────────────────────────────────────────────────
 
-def launch_bridge(bridge_path: str, topology: str, fault_reset_s: float, debug: bool = False):
+def launch_bridge(bridge_path: str, topology: str, fault_reset_s: float,
+                  pub_hz: float, debug: bool = False):
     """Launch bridge_ros2 as a subprocess with sudo -E."""
     cmd = [
         "sudo", "-E",
@@ -331,11 +507,11 @@ def launch_bridge(bridge_path: str, topology: str, fault_reset_s: float, debug: 
         "--ros-args",
         "-p", f"topology:={topology}",
         "-p", f"fault_reset_s:={fault_reset_s}",
+        "-p", f"pub_hz:={pub_hz}",
     ]
     if debug:
         cmd += ["-p", "debug:=1"]
     print(f"[dyno_gui] Launching: {' '.join(cmd)}")
-    # Inherit stdout/stderr so bridge output appears in the terminal.
     proc = subprocess.Popen(cmd)
     return proc
 
@@ -357,14 +533,14 @@ def parse_args():
     p.add_argument("--no-bridge",     action="store_true",
                    help="Don't launch bridge_ros2 (assume it's already running)")
     p.add_argument("--debug",         action="store_true",
-                   help="Pass debug:=1 to bridge_ros2 (enables verbose status prints)")
+                   help="Pass debug:=1 to bridge_ros2")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
 
-    # ── Launch bridge subprocess ─────────────────────────────────────────────
+    # ── Launch bridge subprocess ──────────────────────────────────────────────
     bridge_proc = None
     if not args.no_bridge:
         if not os.path.isfile(args.bridge):
@@ -372,22 +548,21 @@ def main():
                   f"       Build it first:  bash src/interface_bridges/ros2/build.sh",
                   file=sys.stderr)
             sys.exit(1)
-        bridge_proc = launch_bridge(args.bridge, args.topology, args.fault_reset_s, args.debug)
+        bridge_proc = launch_bridge(
+            args.bridge, args.topology, args.fault_reset_s, args.pub_hz, args.debug)
 
-    # ── ROS2 init ────────────────────────────────────────────────────────────
+    # ── ROS2 init ─────────────────────────────────────────────────────────────
     rclpy.init()
     commander = DynoCommander(pub_hz=args.pub_hz)
 
-    # Spin ROS2 on a background thread so the Qt event loop owns the main thread.
     ros_thread = threading.Thread(
-        target=rclpy.spin, args=(commander,), daemon=True
-    )
+        target=rclpy.spin, args=(commander,), daemon=True)
     ros_thread.start()
 
-    # ── Qt GUI ───────────────────────────────────────────────────────────────
+    # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
     window = DynoWindow(commander)
-    window.resize(420, 380)
+    window.resize(700, 420)
 
     if bridge_proc is not None:
         window.set_status(f"bridge_ros2 PID {bridge_proc.pid}")
@@ -396,16 +571,14 @@ def main():
 
     window.show()
 
-    # Graceful shutdown on Ctrl+C in terminal.
     signal.signal(signal.SIGINT, lambda *_: app.quit())
-
     exit_code = app.exec_()
 
-    # ── Cleanup ──────────────────────────────────────────────────────────────
+    # ── Cleanup ───────────────────────────────────────────────────────────────
     print("[dyno_gui] Window closed — shutting down.")
-
-    # Zero and disable before tearing down ROS.
-    commander.set_command(0, 0, False, False, hold_output1=False)
+    commander.set_command(
+        numeric={k: 0 for k in ALL_CMD_KEYS},
+        main_enable=False, dut_enable=False, hold_output1=False)
     time.sleep(0.1)
 
     rclpy.shutdown()

@@ -18,6 +18,12 @@ source /opt/ros/humble/setup.bash
 
 export FASTRTPS_DEFAULT_PROFILES_FILE="$PROFILES"
 
+# Include user's local pip packages so PyQt5 etc. are visible under sudo.
+USER_SITE="$(python3 -m site --user-site 2>/dev/null || true)"
+if [ -n "$USER_SITE" ]; then
+    export PYTHONPATH="$USER_SITE${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
 exec sudo \
     PYTHONPATH="$PYTHONPATH" \
     FASTRTPS_DEFAULT_PROFILES_FILE="$PROFILES" \

@@ -3,6 +3,7 @@
 #include "ethercat_core/devices/base.hpp"
 #include "ethercat_core/devices/motor_drives/Novanta/Everest/data_types.hpp"
 #include "ethercat_core/devices/motor_drives/Novanta/Everest/pdo.hpp"
+#include <stdexcept>
 #include <unordered_map>
 #include <string>
 
@@ -31,9 +32,24 @@ public:
 
     uint16_t lastStatusWord() const { return last_status_word_; }
 
+    float getGearRatio() const { return gear_ratio_; }
+
+    // Computes and stores gear_ratio = 1 / sensor_ratio.
+    // Throws std::runtime_error if sensor_ratio is too close to zero.
+    void computeGearRatio(float sensor_ratio) {
+        if (std::abs(sensor_ratio) < 1e-4f) {
+            throw std::runtime_error(
+                "Improper gear ratio for slave '" + identity_.name +
+                "': sensor_ratio=" + std::to_string(sensor_ratio) +
+                " is zero or below threshold (0x2364).");
+        }
+        gear_ratio_ = 1.0f / sensor_ratio;
+    }
+
 private:
     PdoScaling scaling_;
     uint16_t   last_status_word_ = 0;
+    float      gear_ratio_       = 1.0f;
 };
 
 } // namespace ethercat_core::novanta::everest

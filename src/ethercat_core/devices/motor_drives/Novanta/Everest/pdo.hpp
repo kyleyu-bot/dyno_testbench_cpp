@@ -57,13 +57,13 @@ static_assert(sizeof(RxPdo) == RX_PDO_SIZE, "RxPdo size mismatch");
 struct TxPdo {
     uint16_t statusword;          // 0x6041
     int8_t   mode_display;        // 0x6061
-    int32_t  encoder_position;    // 0x6064  measured input encoder position
+    int32_t  measured_output_encoder_position_raw;    // 0x6064, output side encoder
     float    bus_voltage;         // 0x2060
     int16_t  estimated_torque;    // 0x6077
     float    motor_temp;          // 0x2063
     uint16_t error_code;          // 0x603F
     int32_t  motor_velocity;      // 0x606C  measured input motor velocity
-    int32_t  output_encoder_pos;  // 0x204A
+    int32_t  input_encoder_pos;   // 0x204A
     int32_t  position_setpoint;   // 0x2078
     float    velocity_setpoint;   // 0x2079
     float    iq_actual;           // 0x203B
