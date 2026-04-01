@@ -101,6 +101,8 @@ struct CommandState {
     bool     dut_enable    = false;
     bool     fault_reset   = false;
     bool     hold_output1  = false;
+    int8_t   main_mode     = static_cast<int8_t>(ModeOfOperation::CYCLIC_SYNC_VELOCITY);
+    int8_t   dut_mode      = static_cast<int8_t>(ModeOfOperation::CYCLIC_SYNC_VELOCITY);
 };
 
 static std::mutex      g_cmd_mutex;
@@ -142,12 +144,14 @@ public:
                 try {
                     const json j = json::parse(msg->data);
                     std::lock_guard<std::mutex> lk(g_cmd_mutex);
-                    g_cmd_state.main_speed   = j.value("main_speed",   0);
-                    g_cmd_state.dut_speed    = j.value("dut_speed",    0);
+                    g_cmd_state.main_speed   = j.value("main_velocity", j.value("main_speed", 0));
+                    g_cmd_state.dut_speed    = j.value("dut_velocity",  j.value("dut_speed",  0));
                     g_cmd_state.main_enable  = j.value("main_enable",  false);
                     g_cmd_state.dut_enable   = j.value("dut_enable",   false);
                     g_cmd_state.fault_reset  = j.value("fault_reset",  false);
                     g_cmd_state.hold_output1 = j.value("hold_output1", false);
+                    g_cmd_state.main_mode    = static_cast<int8_t>(j.value("main_mode", static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
+                    g_cmd_state.dut_mode     = static_cast<int8_t>(j.value("dut_mode",  static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
                 } catch (...) {
                     RCLCPP_WARN(get_logger(), "Failed to parse /dyno/command JSON");
                 }
@@ -462,7 +466,7 @@ int main(int argc, char** argv) {
 
         // Build EtherCAT commands.
         Command main_cmd;
-        main_cmd.mode_of_operation      = ModeOfOperation::CYCLIC_SYNC_VELOCITY;
+        main_cmd.mode_of_operation      = static_cast<ModeOfOperation>(cmd.main_mode);
         main_cmd.target_velocity_rad_s  = static_cast<float>(cmd.main_speed);
         main_cmd.enable_drive           = !in_reset && cmd.main_enable;
         main_cmd.clear_fault            = in_reset || cmd.fault_reset;
@@ -477,7 +481,7 @@ int main(int argc, char** argv) {
         main_cmd.position_loop_kd       = main_gains.position_loop_kd;
 
         Command dut_cmd;
-        dut_cmd.mode_of_operation      = ModeOfOperation::CYCLIC_SYNC_VELOCITY;
+        dut_cmd.mode_of_operation      = static_cast<ModeOfOperation>(cmd.dut_mode);
         dut_cmd.target_velocity_rad_s  = static_cast<float>(cmd.dut_speed);
         dut_cmd.enable_drive           = !in_reset && cmd.dut_enable;
         dut_cmd.clear_fault            = in_reset || cmd.fault_reset;

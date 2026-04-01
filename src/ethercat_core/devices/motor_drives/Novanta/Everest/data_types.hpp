@@ -55,6 +55,7 @@ struct DriveStatus {
     int32_t         measured_input_side_velocity_raw  = 0;    // 0x606C, unit: mrev/s
     int32_t         measured_output_side_position_raw_cnt = 0; // 0x6064, output side encoder
     int32_t         input_encoder_pos            = 0;          // 0x204A, input side encoder
+    int32_t         position_setpoint            = 0;          // 0x2078, position command
     float           velocity_command_received    = 0.0f;
     float           bus_voltage                  = 0.0f;
 

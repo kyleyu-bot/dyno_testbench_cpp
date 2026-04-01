@@ -1,1 +1,0 @@
-/usr/bin/g++ -g CMakeFiles/scan_soem.dir/scan_soem.cpp.o -o scan_soem  ../../_deps/soem-build/libsoem.a -lpthread -lrt 

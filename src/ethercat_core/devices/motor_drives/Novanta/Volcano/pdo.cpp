@@ -61,6 +61,7 @@ DriveStatus unpackStatus(
     int32_t  measured_input_side_velocity_raw = 0;
     int32_t  measured_output_side_position_raw_cnt = 0;
     int32_t  input_encoder_pos     = 0;
+    int32_t  position_setpoint     = 0;
     float    received_velocity_raw = 0.0f;
     float    bus_voltage           = 0.0f;
     uint16_t error_code            = 0;
@@ -77,6 +78,7 @@ DriveStatus unpackStatus(
         measured_input_side_velocity_raw = pdo.motor_velocity;
         measured_output_side_position_raw_cnt = pdo.measured_output_encoder_position_raw;
         input_encoder_pos      = pdo.input_encoder_pos;
+        position_setpoint      = pdo.position_setpoint;
         received_velocity_raw  = pdo.velocity_setpoint;
         bus_voltage            = pdo.bus_voltage;
         al_state_code          = (status_word != 0) ? AL_STATE_OPERATIONAL : 0u;
@@ -124,6 +126,7 @@ DriveStatus unpackStatus(
     s.measured_input_side_velocity_raw       = measured_input_side_velocity_raw;
     s.measured_output_side_position_raw_cnt  = measured_output_side_position_raw_cnt;
     s.input_encoder_pos         = input_encoder_pos;
+    s.position_setpoint         = position_setpoint;
     s.velocity_command_received = received_velocity_raw;
     s.bus_voltage               = bus_voltage;
     s.dc_time_error_ns          = dc_error_ns;
