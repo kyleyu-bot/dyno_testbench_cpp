@@ -97,6 +97,12 @@ static constexpr double      DEFAULT_FAULT_RESET   = 0.5;
 struct CommandState {
     int32_t  main_speed    = 0;
     int32_t  dut_speed     = 0;
+    int32_t  main_position = 0;
+    int32_t  dut_position  = 0;
+    float    main_torque   = 0.0f;
+    float    dut_torque    = 0.0f;
+    float    main_current  = 0.0f;
+    float    dut_current   = 0.0f;
     bool     main_enable   = false;
     bool     dut_enable    = false;
     bool     fault_reset   = false;
@@ -144,14 +150,20 @@ public:
                 try {
                     const json j = json::parse(msg->data);
                     std::lock_guard<std::mutex> lk(g_cmd_mutex);
-                    g_cmd_state.main_speed   = j.value("main_velocity", j.value("main_speed", 0));
-                    g_cmd_state.dut_speed    = j.value("dut_velocity",  j.value("dut_speed",  0));
-                    g_cmd_state.main_enable  = j.value("main_enable",  false);
-                    g_cmd_state.dut_enable   = j.value("dut_enable",   false);
-                    g_cmd_state.fault_reset  = j.value("fault_reset",  false);
-                    g_cmd_state.hold_output1 = j.value("hold_output1", false);
-                    g_cmd_state.main_mode    = static_cast<int8_t>(j.value("main_mode", static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
-                    g_cmd_state.dut_mode     = static_cast<int8_t>(j.value("dut_mode",  static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
+                    g_cmd_state.main_speed    = j.value("main_velocity", j.value("main_speed", 0));
+                    g_cmd_state.dut_speed     = j.value("dut_velocity",  j.value("dut_speed",  0));
+                    g_cmd_state.main_position = j.value("main_position", 0);
+                    g_cmd_state.dut_position  = j.value("dut_position",  0);
+                    g_cmd_state.main_torque   = j.value("main_torque",   0.0f);
+                    g_cmd_state.dut_torque    = j.value("dut_torque",    0.0f);
+                    g_cmd_state.main_current  = j.value("main_current",  0.0f);
+                    g_cmd_state.dut_current   = j.value("dut_current",   0.0f);
+                    g_cmd_state.main_enable   = j.value("main_enable",   false);
+                    g_cmd_state.dut_enable    = j.value("dut_enable",    false);
+                    g_cmd_state.fault_reset   = j.value("fault_reset",   false);
+                    g_cmd_state.hold_output1  = j.value("hold_output1",  false);
+                    g_cmd_state.main_mode     = static_cast<int8_t>(j.value("main_mode", static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
+                    g_cmd_state.dut_mode      = static_cast<int8_t>(j.value("dut_mode",  static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
                 } catch (...) {
                     RCLCPP_WARN(get_logger(), "Failed to parse /dyno/command JSON");
                 }
@@ -440,6 +452,9 @@ int main(int argc, char** argv) {
             j["idc_actual"]       = ds.idc_actual;
             j["iq_command"]       = ds.iq_command;
             j["id_command"]       = ds.id_command;
+            j["max_velocity_abs"] = ds.max_velocity_abs;
+            j["min_position"]     = ds.min_position;
+            j["max_position"]     = ds.max_position;
         } else {
             j["state"] = "unavailable";
         }
@@ -468,6 +483,9 @@ int main(int argc, char** argv) {
         Command main_cmd;
         main_cmd.mode_of_operation      = static_cast<ModeOfOperation>(cmd.main_mode);
         main_cmd.target_velocity_rad_s  = static_cast<float>(cmd.main_speed);
+        main_cmd.target_position_rad    = static_cast<float>(cmd.main_position);
+        main_cmd.target_torque_nm       = cmd.main_torque;
+        main_cmd.torque_command_2022    = cmd.main_current;
         main_cmd.enable_drive           = !in_reset && cmd.main_enable;
         main_cmd.clear_fault            = in_reset || cmd.fault_reset;
         main_cmd.torque_kp              = main_gains.torque_kp;
@@ -483,6 +501,9 @@ int main(int argc, char** argv) {
         Command dut_cmd;
         dut_cmd.mode_of_operation      = static_cast<ModeOfOperation>(cmd.dut_mode);
         dut_cmd.target_velocity_rad_s  = static_cast<float>(cmd.dut_speed);
+        dut_cmd.target_position_rad    = static_cast<float>(cmd.dut_position);
+        dut_cmd.target_torque_nm       = cmd.dut_torque;
+        dut_cmd.torque_command_2022    = cmd.dut_current;
         dut_cmd.enable_drive           = !in_reset && cmd.dut_enable;
         dut_cmd.clear_fault            = in_reset || cmd.fault_reset;
         dut_cmd.torque_kp              = dut_gains.torque_kp;

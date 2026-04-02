@@ -114,6 +114,16 @@ class DynoCommander(Node):
         self._main_mode    = DS402_DEFAULT_MODE
         self._dut_mode     = DS402_DEFAULT_MODE
 
+        # Drive limits — updated from status topics, used to auto-set slider ranges.
+        self._limits_lock  = threading.Lock()
+        self._main_limits  = {"max_velocity_abs": 0.0, "min_position": 0, "max_position": 0}
+        self._dut_limits   = {"max_velocity_abs": 0.0, "min_position": 0, "max_position": 0}
+
+        self.create_subscription(StringMsg, "/dyno/main_drive/status",
+            lambda msg: self._on_status(msg, "main"), 10)
+        self.create_subscription(StringMsg, "/dyno/dut/status",
+            lambda msg: self._on_status(msg, "dut"), 10)
+
         period = 1.0 / max(pub_hz, 1.0)
         self.create_timer(period, self._publish)
 
@@ -130,6 +140,50 @@ class DynoCommander(Node):
             self._hold_output1 = hold_output1
             self._main_mode    = main_mode
             self._dut_mode     = dut_mode
+
+    def _on_status(self, msg: StringMsg, drive: str) -> None:
+        try:
+            data = json.loads(msg.data)
+        except Exception:
+            return
+        limits = {
+            "max_velocity_abs": float(data.get("max_velocity_abs", 0.0)),
+            "min_position":     int(data.get("min_position", 0)),
+            "max_position":     int(data.get("max_position", 0)),
+        }
+        with self._limits_lock:
+            if drive == "main":
+                self._main_limits = limits
+            else:
+                self._dut_limits = limits
+
+    def get_limits(self, field_key: str):
+        """Return (min, max) slider limits for a command field, or None if unavailable."""
+        _INT32_MIN = -(2 ** 31)
+        _INT32_MAX =  (2 ** 31) - 1
+
+        if field_key.startswith("main_"):
+            with self._limits_lock:
+                limits = dict(self._main_limits)
+            field_type = field_key[5:]   # strip "main_"
+        elif field_key.startswith("dut_"):
+            with self._limits_lock:
+                limits = dict(self._dut_limits)
+            field_type = field_key[4:]   # strip "dut_"
+        else:
+            return None
+
+        if field_type == "velocity":
+            max_vel = int(limits["max_velocity_abs"])
+            if max_vel > 0:
+                return (-max_vel, max_vel)
+        elif field_type == "position":
+            lo = limits["min_position"]
+            hi = limits["max_position"]
+            # Skip if drive reported no limits (stored as INT32 extremes)
+            if lo != _INT32_MIN and hi != _INT32_MAX and not (lo == 0 and hi == 0):
+                return (lo, hi)
+        return None
 
     def pulse_fault_reset(self):
         """Send fault_reset=true for one publish cycle."""
@@ -192,15 +246,19 @@ class SliderSlot(QGroupBox):
 
     _PLACEHOLDER = "— drop field here —"
 
-    def __init__(self, parent=None):
+    def __init__(self, on_drop=None, parent=None):
         super().__init__(SliderSlot._PLACEHOLDER, parent)
         self._field: str | None = None
+        self._on_drop = on_drop   # callable(field_key) -> (min, max) | None
         self.setAcceptDrops(True)
         self.setMinimumWidth(110)
 
+        _SPIN_LO = -(2 ** 30)
+        _SPIN_HI =  (2 ** 30) - 1
+
         # Max spinbox
         self._max_spin = QSpinBox()
-        self._max_spin.setRange(-1_000_000, 1_000_000)
+        self._max_spin.setRange(_SPIN_LO, _SPIN_HI)
         self._max_spin.setValue(1000)
         self._max_spin.setPrefix("Max: ")
 
@@ -214,7 +272,7 @@ class SliderSlot(QGroupBox):
 
         # Min spinbox
         self._min_spin = QSpinBox()
-        self._min_spin.setRange(-1_000_000, 1_000_000)
+        self._min_spin.setRange(_SPIN_LO, _SPIN_HI)
         self._min_spin.setValue(-1000)
         self._min_spin.setPrefix("Min: ")
 
@@ -289,6 +347,26 @@ class SliderSlot(QGroupBox):
     def dropEvent(self, ev):
         key = bytes(ev.mimeData().data(CMD_MIME)).decode()
         self._assign(key)
+        if self._on_drop:
+            limits = self._on_drop(key)
+            if limits is not None:
+                lo, hi = limits
+                # Block signals to avoid cross-clamping during bulk update.
+                for w in (self._min_spin, self._max_spin,
+                          self._slider, self._exact_spin):
+                    w.blockSignals(True)
+                self._min_spin.setValue(lo)
+                self._max_spin.setValue(hi)
+                self._slider.setMinimum(lo)
+                self._slider.setMaximum(hi)
+                self._exact_spin.setMinimum(lo)
+                self._exact_spin.setMaximum(hi)
+                self._slider.setValue(0)
+                self._exact_spin.setValue(0)
+                self._val_label.setText("0")
+                for w in (self._min_spin, self._max_spin,
+                          self._slider, self._exact_spin):
+                    w.blockSignals(False)
         ev.acceptProposedAction()
 
     def contextMenuEvent(self, ev):
@@ -359,7 +437,7 @@ class DynoWindow(QMainWindow):
         self._field_list = CommandFieldList()
 
         # ── Centre: slider slots ───────────────────────────────────────────────
-        self._slots = [SliderSlot() for _ in range(NUM_SLOTS)]
+        self._slots = [SliderSlot(on_drop=self._cmd.get_limits) for _ in range(NUM_SLOTS)]
         slots_w   = QWidget()
         slots_lay = QHBoxLayout(slots_w)
         slots_lay.setSpacing(6)
