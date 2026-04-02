@@ -180,9 +180,12 @@ class DynoCommander(Node):
         elif field_type == "position":
             lo = limits["min_position"]
             hi = limits["max_position"]
-            # Skip if drive reported no limits (stored as INT32 extremes)
-            if lo != _INT32_MIN and hi != _INT32_MAX and not (lo == 0 and hi == 0):
-                return (lo, hi)
+            # Skip if not yet received (both 0) or device has no limits (INT32 extremes).
+            if (lo == 0 and hi == 0):
+                return None
+            if lo == _INT32_MIN or hi == _INT32_MAX:
+                return None
+            return (lo, hi)
         return None
 
     def pulse_fault_reset(self):
@@ -246,10 +249,14 @@ class SliderSlot(QGroupBox):
 
     _PLACEHOLDER = "— drop field here —"
 
-    def __init__(self, on_drop=None, parent=None):
+    def __init__(self, on_drop=None, is_field_allowed=None,
+                 on_assigned=None, on_unassigned=None, parent=None):
         super().__init__(SliderSlot._PLACEHOLDER, parent)
         self._field: str | None = None
-        self._on_drop = on_drop   # callable(field_key) -> (min, max) | None
+        self._on_drop          = on_drop           # (key) -> (min,max) | None
+        self._is_field_allowed = is_field_allowed  # (key) -> bool
+        self._on_assigned      = on_assigned       # (key) -> None
+        self._on_unassigned    = on_unassigned     # (key) -> None
         self.setAcceptDrops(True)
         self.setMinimumWidth(110)
 
@@ -285,6 +292,10 @@ class SliderSlot(QGroupBox):
         self._val_label = QLabel("0")
         self._val_label.setAlignment(Qt.AlignCenter)
 
+        # Clear button
+        self._clear_btn = QPushButton("Clear")
+        self._clear_btn.clicked.connect(self._unassign)
+
         col = QVBoxLayout(self)
         col.addWidget(self._max_spin)
         col.addWidget(self._slider, 1, Qt.AlignHCenter)
@@ -292,6 +303,7 @@ class SliderSlot(QGroupBox):
         col.addWidget(QLabel("Exact:"))
         col.addWidget(self._exact_spin)
         col.addWidget(self._val_label)
+        col.addWidget(self._clear_btn)
 
         # Signal wiring
         self._max_spin.valueChanged.connect(self._on_max_changed)
@@ -337,6 +349,12 @@ class SliderSlot(QGroupBox):
 
     def dragEnterEvent(self, ev):
         if ev.mimeData().hasFormat(CMD_MIME):
+            key = bytes(ev.mimeData().data(CMD_MIME)).decode()
+            # Allow if: this slot already has the field, OR it's not taken elsewhere.
+            if key != self._field and self._is_field_allowed and \
+                    not self._is_field_allowed(key):
+                ev.ignore()
+                return
             ev.acceptProposedAction()
         else:
             ev.ignore()
@@ -381,22 +399,32 @@ class SliderSlot(QGroupBox):
     # ── assignment ────────────────────────────────────────────────────────────
 
     def _assign(self, key: str):
+        if self._field == key:
+            return  # No change — same field re-dropped
+        if self._field is not None and self._on_unassigned:
+            self._on_unassigned(self._field)   # Release previous field
         self._field = key
         label = next((l for k, l in COMMAND_FIELDS if k == key), key)
         self.setTitle(label)
         self._set_controls_enabled(True)
+        if self._on_assigned:
+            self._on_assigned(key)
 
     def _unassign(self):
+        old = self._field
         self._field = None
         self.setTitle(SliderSlot._PLACEHOLDER)
         self._slider.setValue(0)
         self._set_controls_enabled(False)
+        if old is not None and self._on_unassigned:
+            self._on_unassigned(old)
 
     def _set_controls_enabled(self, enabled: bool):
         self._slider.setEnabled(enabled)
         self._max_spin.setEnabled(enabled)
         self._min_spin.setEnabled(enabled)
         self._exact_spin.setEnabled(enabled)
+        self._clear_btn.setEnabled(enabled)
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -437,7 +465,16 @@ class DynoWindow(QMainWindow):
         self._field_list = CommandFieldList()
 
         # ── Centre: slider slots ───────────────────────────────────────────────
-        self._slots = [SliderSlot(on_drop=self._cmd.get_limits) for _ in range(NUM_SLOTS)]
+        self._assigned_fields: set[str] = set()
+        self._slots = [
+            SliderSlot(
+                on_drop          = self._cmd.get_limits,
+                is_field_allowed = lambda key: key not in self._assigned_fields,
+                on_assigned      = lambda key: self._assigned_fields.add(key),
+                on_unassigned    = lambda key: self._assigned_fields.discard(key),
+            )
+            for _ in range(NUM_SLOTS)
+        ]
         slots_w   = QWidget()
         slots_lay = QHBoxLayout(slots_w)
         slots_lay.setSpacing(6)
