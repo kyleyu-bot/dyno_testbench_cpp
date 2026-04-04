@@ -115,9 +115,10 @@ class DynoCommander(Node):
         self._dut_mode     = DS402_DEFAULT_MODE
 
         # Drive limits — updated from status topics, used to auto-set slider ranges.
-        self._limits_lock  = threading.Lock()
-        self._main_limits  = {"max_velocity_abs": 0.0, "min_position": 0, "max_position": 0}
-        self._dut_limits   = {"max_velocity_abs": 0.0, "min_position": 0, "max_position": 0}
+        self._limits_lock     = threading.Lock()
+        self._main_limits     = {"max_velocity_abs": 0.0, "min_position": 0, "max_position": 0}
+        self._dut_limits      = {"max_velocity_abs": 0.0, "min_position": 0, "max_position": 0}
+        self._limits_callback = None   # callable(drive: str), set by DynoWindow
 
         self.create_subscription(StringMsg, "/dyno/main_drive/status",
             lambda msg: self._on_status(msg, "main"), 10)
@@ -156,6 +157,11 @@ class DynoCommander(Node):
                 self._main_limits = limits
             else:
                 self._dut_limits = limits
+        if self._limits_callback:
+            self._limits_callback(drive)
+
+    def set_limits_callback(self, cb) -> None:
+        self._limits_callback = cb
 
     def get_limits(self, field_key: str):
         """Return (min, max) slider limits for a command field, or None if unavailable."""
@@ -180,11 +186,16 @@ class DynoCommander(Node):
         elif field_type == "position":
             lo = limits["min_position"]
             hi = limits["max_position"]
-            # Skip if not yet received (both 0) or device has no limits (INT32 extremes).
-            if (lo == 0 and hi == 0):
+            # Not yet received (initialised to 0,0 before first status message).
+            if lo == 0 and hi == 0:
                 return None
-            if lo == _INT32_MIN or hi == _INT32_MAX:
-                return None
+            # Device reports no limits (adapter sets INT32 extremes when raw=0,0).
+            # Use a large but usable default so the slider isn't stuck at ±1000.
+            _NO_LIMIT = 1_000_000
+            if lo == _INT32_MIN:
+                lo = -_NO_LIMIT
+            if hi == _INT32_MAX:
+                hi = _NO_LIMIT
             return (lo, hi)
         return None
 
@@ -439,6 +450,19 @@ class SliderSlot(QGroupBox):
     def zero(self):
         self._slider.setValue(0)
 
+    def apply_limits(self, lo: int, hi: int):
+        """Update slider range without resetting the current value."""
+        for w in (self._min_spin, self._max_spin, self._slider, self._exact_spin):
+            w.blockSignals(True)
+        self._min_spin.setValue(lo)
+        self._max_spin.setValue(hi)
+        self._slider.setMinimum(lo)
+        self._slider.setMaximum(hi)
+        self._exact_spin.setMinimum(lo)
+        self._exact_spin.setMaximum(hi)
+        for w in (self._min_spin, self._max_spin, self._slider, self._exact_spin):
+            w.blockSignals(False)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Qt main window
@@ -455,6 +479,7 @@ class DynoWindow(QMainWindow):
 
         self.setWindowTitle("Dyno Control")
         self._build_ui()
+        commander.set_limits_callback(self._on_limits_updated)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._push_command)
@@ -604,6 +629,18 @@ class DynoWindow(QMainWindow):
             main_mode    = DS402_MODES[self._main_mode_combo.currentIndex()][1],
             dut_mode     = DS402_MODES[self._dut_mode_combo.currentIndex()][1],
         )
+
+    def _on_limits_updated(self, drive: str) -> None:
+        """Called from the ROS spin thread — schedule GUI update on the Qt thread."""
+        QTimer.singleShot(0, lambda: self._refresh_slot_limits(drive))
+
+    def _refresh_slot_limits(self, drive: str) -> None:
+        prefix = "main_" if drive == "main" else "dut_"
+        for slot in self._slots:
+            if slot.field and slot.field.startswith(prefix):
+                limits = self._cmd.get_limits(slot.field)
+                if limits is not None:
+                    slot.apply_limits(*limits)
 
     def set_status(self, text: str):
         self._status_label.setText(text)
