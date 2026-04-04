@@ -19,6 +19,9 @@ std::any NovantaEverestAdapter::unpackTxPdo(
     DriveStatus status = unpackStatus(
         data, size, seq, stamp_ns, cycle_time_ns, dc_error_ns, &scaling_
     );
+    status.max_velocity_abs = max_velocity_abs_;
+    status.min_position     = min_position_;
+    status.max_position     = max_position_;
     last_status_word_ = status.status_word;
     return status;
 }
@@ -35,6 +38,9 @@ std::unordered_map<std::string, SdoReadSpec> NovantaEverestAdapter::startupReadS
         {"position_loop_kd",       {.name="position_loop_kd",       .index=0x2513, .subindex=0x00, .data_type="f32"}},
         {"motor_kt",               {.name="motor_kt",               .index=0x243B, .subindex=0x00, .data_type="f32"}},
         {"sensor_ratio",           {.name="sensor_ratio",           .index=0x2364, .subindex=0x00, .data_type="f32"}},
+        {"max_velocity_abs",       {.name="max_velocity_abs",       .index=0x21E8, .subindex=0x00, .data_type="f32"}},
+        {"min_position",           {.name="min_position",           .index=0x21EA, .subindex=0x00, .data_type="f32"}},
+        {"max_position",           {.name="max_position",           .index=0x21EB, .subindex=0x00, .data_type="f32"}},
     };
 }
 

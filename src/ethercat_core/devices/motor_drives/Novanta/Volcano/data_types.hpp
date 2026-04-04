@@ -56,6 +56,9 @@ struct DriveStatus {
     int32_t         input_encoder_pos            = 0;  // 0x204A, input side encoder
     float           velocity_command_received    = 0.0f;
     int32_t         position_setpoint            = 0;
+    int32_t         max_position                 = 0;
+    int32_t         min_position                 = 0;
+    float           max_velocity_abs             = 0.0f;
     float           bus_voltage                  = 0.0f;
     float           motor_temp                   = 0.0f;
     float           iq_actual                    = 0.0f;

@@ -439,6 +439,18 @@ void EthercatMaster::readStartupParams(
             va->computeGearRatio(sr_it->second);
         }
     }
+
+    // Apply position and velocity limits (0x21E8, 0x21EA, 0x21EB).
+    auto vel_it     = params.find("max_velocity_abs");
+    auto min_pos_it = params.find("min_position");
+    auto max_pos_it = params.find("max_position");
+    if (vel_it != params.end() && min_pos_it != params.end() && max_pos_it != params.end()) {
+        if (auto* ea = dynamic_cast<novanta::everest::NovantaEverestAdapter*>(&adapter)) {
+            ea->applyLimits(vel_it->second, min_pos_it->second, max_pos_it->second);
+        } else if (auto* va = dynamic_cast<novanta::volcano::NovantaVolcanoAdapter*>(&adapter)) {
+            va->applyLimits(vel_it->second, min_pos_it->second, max_pos_it->second);
+        }
+    }
 }
 
 bool EthercatMaster::allSlavesInOp() const {

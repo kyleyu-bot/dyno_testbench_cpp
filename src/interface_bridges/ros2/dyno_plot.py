@@ -81,12 +81,15 @@ CURVE_COLORS = [
 class DataStore:
     """
     Thread-safe ring-buffer keyed by (topic, field).
-    Each entry is a (monotonic_time, float_value) pair.
+    Timestamps and values are stored in separate deques to avoid per-call
+    tuple unpacking.  get() uses np.searchsorted (O log N) to slice the
+    window instead of a O(N) list comprehension.
     """
 
     def __init__(self, max_samples: int):
         self._lock    = threading.Lock()
-        self._bufs:   dict[tuple[str, str], deque] = {}
+        self._ts:     dict[tuple[str, str], deque] = {}   # monotonic timestamps
+        self._vs:     dict[tuple[str, str], deque] = {}   # float values
         self._fields: dict[str, list[str]]         = {}
         self._max     = max_samples
 
@@ -95,12 +98,14 @@ class DataStore:
     def push(self, topic: str, field: str, t: float, value: float) -> None:
         key = (topic, field)
         with self._lock:
-            if key not in self._bufs:
-                self._bufs[key] = deque(maxlen=self._max)
+            if key not in self._ts:
+                self._ts[key] = deque(maxlen=self._max)
+                self._vs[key] = deque(maxlen=self._max)
                 self._fields.setdefault(topic, [])
                 if field not in self._fields[topic]:
                     self._fields[topic].append(field)
-            self._bufs[key].append((t, value))
+            self._ts[key].append(t)
+            self._vs[key].append(value)
 
     # ── read ───────────────────────────────────────────────────────────────────
 
@@ -108,23 +113,20 @@ class DataStore:
         """Return (times_relative, values) numpy arrays for the last window_s."""
         key = (topic, field)
         with self._lock:
-            buf = self._bufs.get(key)
-            if not buf:
+            ts_buf = self._ts.get(key)
+            if not ts_buf:
                 return np.array([]), np.array([])
-            arr = list(buf)
+            # Copy inside the lock so the ROS thread can keep appending.
+            ts = np.array(ts_buf, dtype=np.float64)
+            vs = np.array(self._vs[key], dtype=np.float64)
 
-        if not arr:
+        if len(ts) == 0:
             return np.array([]), np.array([])
 
-        t_end   = arr[-1][0]
-        t_start = t_end - window_s
-        filt    = [(t, v) for t, v in arr if t >= t_start]
-        if not filt:
-            return np.array([]), np.array([])
-
-        ts, vs = zip(*filt)
-        ts = np.array(ts) - t_end   # relative: 0 = now, negative = past
-        return ts, np.array(vs)
+        t_end = ts[-1]
+        # Binary search for the first sample inside the window — O(log N).
+        idx   = np.searchsorted(ts, t_end - window_s, side="left")
+        return ts[idx:] - t_end, vs[idx:]
 
     def known_fields(self) -> dict[str, list[str]]:
         with self._lock:
@@ -135,9 +137,9 @@ class DataStore:
     def set_max_samples(self, n: int) -> None:
         with self._lock:
             self._max = n
-            for key in self._bufs:
-                old = self._bufs[key]
-                self._bufs[key] = deque(old, maxlen=n)
+            for key in list(self._ts):
+                self._ts[key] = deque(self._ts[key], maxlen=n)
+                self._vs[key] = deque(self._vs[key], maxlen=n)
 
 
 # ── ROS2 subscriber node ───────────────────────────────────────────────────────
@@ -294,11 +296,20 @@ class PlotCell(pg.PlotWidget):
 
     # ── update ─────────────────────────────────────────────────────────────────
 
+    # Maximum points rendered per curve — keeps GPU/CPU load bounded.
+    _MAX_DISPLAY_PTS = 2000
+
     def update_curves(self, window_s: float) -> None:
         for c in self._curves:
             ts, vs = self._store.get(c["topic"], c["field"], window_s)
-            if len(ts) > 0:
-                c["item"].setData(ts, vs)
+            n = len(ts)
+            if n == 0:
+                continue
+            if n > self._MAX_DISPLAY_PTS:
+                step = n // self._MAX_DISPLAY_PTS
+                ts = ts[::step]
+                vs = vs[::step]
+            c["item"].setData(ts, vs)
 
     # ── context menu ───────────────────────────────────────────────────────────
 
@@ -372,7 +383,7 @@ class DynoPlotWindow(QMainWindow):
         self.setWindowTitle("Dyno Live Plot")
         self.resize(1280, 720)
 
-        pg.setConfigOptions(antialias=True)
+        pg.setConfigOptions(antialias=False, useNumba=False)
 
         # ── Controls bar ───────────────────────────────────────────────────────
         ctrl     = QWidget()
