@@ -4,6 +4,7 @@
 #include "ethercat_core/master.hpp"
 
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -31,6 +32,11 @@ struct LoopRtConfig {
 // use, call run_once() directly.
 class EthercatLoop {
 public:
+    // Callback invoked from the RT thread after every completed cycle.
+    // Must be fast and non-blocking (no I/O, no heavy allocation).
+    // status and stats reflect the cycle just completed.
+    using CycleCallback = std::function<void(const SystemStatus&, const LoopStats&)>;
+
     explicit EthercatLoop(
         MasterRuntime&  runtime,
         int             cycle_hz  = 1000,
@@ -44,6 +50,10 @@ public:
 
     void start();
     void stop(double timeout_s = 2.0);
+
+    // Register a callback fired from the RT thread after each cycle.
+    // Call before start().  Pass nullptr to clear.
+    void setCycleCallback(CycleCallback cb);
 
     // Thread-safe command setter — takes effect on the next cycle.
     void setCommand(const SystemCommand& cmd);
@@ -69,6 +79,8 @@ private:
 
     std::thread        thread_;
     std::atomic<bool>  stop_flag_{false};
+
+    CycleCallback      cycle_callback_;   // called from RT thread — must be cheap
 };
 
 } // namespace ethercat_core
