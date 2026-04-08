@@ -43,6 +43,8 @@
 #include "ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp"
 #include "ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp"
 
+#include "pdo_log.hpp"
+
 extern "C" {
 #include "ethercat.h"
 }
@@ -54,13 +56,21 @@ extern "C" {
 
 #include <nlohmann/json.hpp>
 
+#include <quill/Backend.h>
+#include <quill/Frontend.h>
+#include <quill/LogMacros.h>
+#include <quill/Logger.h>
+#include <quill/sinks/FileSink.h>
+
 #include <algorithm>
 #include <any>
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <ctime>
 #include <signal.h>
 #include <cstring>
+#include <sys/stat.h>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -225,6 +235,57 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_ch2_t_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_cmd_;
 };
+
+// ── PDO logging helpers ────────────────────────────────────────────────────────
+
+/// Serialise one PdoLogRecord as a CSV row (no trailing newline).
+/// Column order matches dyno::PDO_LOG_CSV_HEADER.
+static std::string record_to_csv(const dyno::PdoLogRecord& r)
+{
+    std::ostringstream o;
+    // metadata
+    o << r.cycle_count   << ',' << r.stamp_ns      << ',' << r.wkc         << ','
+      << r.cycle_time_ns << ',' << r.dc_error_ns   << ',' << r.period_ns   << ',';
+    // main tx
+    o << r.main_tx_statusword        << ',' << static_cast<int>(r.main_tx_mode_display)  << ','
+      << r.main_tx_output_enc_pos    << ',' << r.main_tx_bus_voltage        << ','
+      << r.main_tx_torque_nm         << ',' << r.main_tx_motor_temp         << ','
+      << r.main_tx_error_code        << ',' << r.main_tx_motor_velocity     << ','
+      << r.main_tx_input_enc_pos     << ',' << r.main_tx_position_setpoint  << ','
+      << r.main_tx_velocity_setpoint << ',' << r.main_tx_iq_actual          << ','
+      << r.main_tx_id_actual         << ',' << r.main_tx_idc_actual         << ','
+      << r.main_tx_iq_command        << ',' << r.main_tx_id_command         << ',';
+    // main rx
+    o << static_cast<int>(r.main_rx_mode_of_operation) << ','
+      << r.main_rx_target_position   << ',' << r.main_rx_target_velocity    << ','
+      << r.main_rx_torque_command    << ',' << r.main_rx_torque_kp          << ','
+      << r.main_rx_torque_max_out    << ',' << r.main_rx_torque_min_out     << ','
+      << r.main_rx_vel_kp            << ',' << r.main_rx_vel_ki             << ','
+      << r.main_rx_vel_kd            << ',' << r.main_rx_pos_kp             << ','
+      << r.main_rx_pos_ki            << ',' << r.main_rx_pos_kd             << ','
+      << static_cast<int>(r.main_rx_enable) << ',';
+    // dut tx
+    o << r.dut_tx_statusword         << ',' << static_cast<int>(r.dut_tx_mode_display)   << ','
+      << r.dut_tx_output_enc_pos     << ',' << r.dut_tx_bus_voltage         << ','
+      << r.dut_tx_torque_nm          << ',' << r.dut_tx_motor_temp          << ','
+      << r.dut_tx_error_code         << ',' << r.dut_tx_motor_velocity      << ','
+      << r.dut_tx_input_enc_pos      << ',' << r.dut_tx_position_setpoint   << ','
+      << r.dut_tx_velocity_setpoint  << ',' << r.dut_tx_iq_actual           << ','
+      << r.dut_tx_id_actual          << ',' << r.dut_tx_idc_actual          << ','
+      << r.dut_tx_iq_command         << ',' << r.dut_tx_id_command          << ',';
+    // dut rx
+    o << static_cast<int>(r.dut_rx_mode_of_operation) << ','
+      << r.dut_rx_target_position    << ',' << r.dut_rx_target_velocity     << ','
+      << r.dut_rx_torque_command     << ',' << r.dut_rx_torque_kp           << ','
+      << r.dut_rx_torque_max_out     << ',' << r.dut_rx_torque_min_out      << ','
+      << r.dut_rx_vel_kp             << ',' << r.dut_rx_vel_ki              << ','
+      << r.dut_rx_vel_kd             << ',' << r.dut_rx_pos_kp              << ','
+      << r.dut_rx_pos_ki             << ',' << r.dut_rx_pos_kd              << ','
+      << static_cast<int>(r.dut_rx_enable) << ',';
+    // sensors
+    o << r.encoder_count << ',' << r.torque_ch1_nm << ',' << r.torque_ch2_nm;
+    return o.str();
+}
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
@@ -398,6 +459,59 @@ int main(int argc, char** argv) {
     EthercatLoop loop(*rt, cfg.cycle_hz, rt_cfg);
     loop.start();
 
+    // ── Quill logging setup ───────────────────────────────────────────────────
+    // Ensure test_data_log/ directory exists next to the binary's cwd.
+    static constexpr const char* LOG_DIR = "test_data_log";
+    {
+        struct stat st{};
+        if (stat(LOG_DIR, &st) != 0) {
+            if (mkdir(LOG_DIR, 0755) != 0) {
+                RCLCPP_WARN(node->get_logger(),
+                    "Could not create log directory '%s' (errno=%d) — logging to cwd.", LOG_DIR, errno);
+            }
+        }
+    }
+
+    // Build a timestamped log filename: test_data_log/dyno_pdo_YYYYMMDD_HHMMSS.csv
+    std::string log_path;
+    {
+        std::time_t t   = std::time(nullptr);
+        std::tm*    tm_ = std::localtime(&t);
+        char        buf[64];
+        std::strftime(buf, sizeof(buf), "test_data_log/dyno_pdo_%Y%m%d_%H%M%S.csv", tm_);
+        log_path = buf;
+    }
+
+    quill::Backend::start();
+
+    quill::FileSinkConfig fsink_cfg;
+    fsink_cfg.set_open_mode('w');
+    auto file_sink = quill::Frontend::create_or_get_sink<quill::FileSink>(log_path, fsink_cfg);
+
+    // Use a message-only pattern — we supply all timestamp info inside the CSV row.
+    quill::Logger* pdo_logger = quill::Frontend::create_or_get_logger(
+        "pdo",
+        std::move(file_sink),
+        quill::PatternFormatterOptions{"%(message)"});
+
+    RCLCPP_INFO(node->get_logger(), "PDO log: %s", log_path.c_str());
+
+    // Ring buffer (depth 100) shared between the publish block and the drain thread.
+    dyno::PdoLogBuffer<100> log_buf;
+
+    // Write CSV header as first line.
+    LOG_INFO(pdo_logger, "{}", dyno::PDO_LOG_CSV_HEADER);
+
+    // Drain thread: pops records from the ring buffer and writes them via quill.
+    std::thread log_drain([&]() {
+        while (!g_shutdown.load() || !log_buf.empty()) {
+            while (auto rec = log_buf.pop()) {
+                LOG_INFO(pdo_logger, "{}", record_to_csv(*rec));
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    });
+
     // Pin the main thread (publish/command loop) to all CPUs except the ones
     // reserved for the EtherCAT RT loop, so they never compete on the same core.
     {
@@ -557,6 +671,103 @@ int main(int argc, char** argv) {
                 enc, ch1_t, ch2_t
             );
 
+            // ── Push PDO snapshot into the log ring buffer ────────────────────
+            {
+                dyno::PdoLogRecord rec;
+                // metadata
+                rec.cycle_count   = stats.cycle_count;
+                rec.stamp_ns      = status.stamp_ns;
+                rec.wkc           = stats.last_wkc;
+                rec.cycle_time_ns = stats.last_cycle_time_ns;
+                rec.dc_error_ns   = stats.last_dc_error_ns;
+                rec.period_ns     = stats.last_period_ns;
+
+                auto fill_tx = [&](const DriveStatus& ds, bool is_main) {
+                    if (is_main) {
+                        rec.main_tx_statusword          = ds.status_word;
+                        rec.main_tx_mode_display        = ds.mode_of_operation_display;
+                        rec.main_tx_output_enc_pos      = ds.measured_output_side_position_raw_cnt;
+                        rec.main_tx_bus_voltage         = ds.bus_voltage;
+                        rec.main_tx_torque_nm           = ds.measured_torque_nm;
+                        rec.main_tx_motor_temp          = ds.motor_temp;
+                        rec.main_tx_error_code          = ds.error_code;
+                        rec.main_tx_motor_velocity      = ds.measured_input_side_velocity_raw;
+                        rec.main_tx_input_enc_pos       = ds.input_encoder_pos;
+                        rec.main_tx_position_setpoint   = ds.position_setpoint;
+                        rec.main_tx_velocity_setpoint   = ds.velocity_command_received;
+                        rec.main_tx_iq_actual           = ds.iq_actual;
+                        rec.main_tx_id_actual           = ds.id_actual;
+                        rec.main_tx_idc_actual          = ds.idc_actual;
+                        rec.main_tx_iq_command          = ds.iq_command;
+                        rec.main_tx_id_command          = ds.id_command;
+                    } else {
+                        rec.dut_tx_statusword           = ds.status_word;
+                        rec.dut_tx_mode_display         = ds.mode_of_operation_display;
+                        rec.dut_tx_output_enc_pos       = ds.measured_output_side_position_raw_cnt;
+                        rec.dut_tx_bus_voltage          = ds.bus_voltage;
+                        rec.dut_tx_torque_nm            = ds.measured_torque_nm;
+                        rec.dut_tx_motor_temp           = ds.motor_temp;
+                        rec.dut_tx_error_code           = ds.error_code;
+                        rec.dut_tx_motor_velocity       = ds.measured_input_side_velocity_raw;
+                        rec.dut_tx_input_enc_pos        = ds.input_encoder_pos;
+                        rec.dut_tx_position_setpoint    = ds.position_setpoint;
+                        rec.dut_tx_velocity_setpoint    = ds.velocity_command_received;
+                        rec.dut_tx_iq_actual            = ds.iq_actual;
+                        rec.dut_tx_id_actual            = ds.id_actual;
+                        rec.dut_tx_idc_actual           = ds.idc_actual;
+                        rec.dut_tx_iq_command           = ds.iq_command;
+                        rec.dut_tx_id_command           = ds.id_command;
+                    }
+                };
+
+                auto main_it = status.by_slave.find(drive_slave);
+                if (main_it != status.by_slave.end() && main_it->second.has_value())
+                    fill_tx(std::any_cast<const DriveStatus&>(main_it->second), true);
+
+                auto dut_it = status.by_slave.find(dut_slave);
+                if (dut_present && dut_it != status.by_slave.end() && dut_it->second.has_value())
+                    fill_tx(std::any_cast<const DriveStatus&>(dut_it->second), false);
+
+                // main rx
+                rec.main_rx_mode_of_operation = static_cast<int8_t>(main_cmd.mode_of_operation);
+                rec.main_rx_target_position   = static_cast<int32_t>(main_cmd.target_position_rad);
+                rec.main_rx_target_velocity   = static_cast<int32_t>(main_cmd.target_velocity_rad_s);
+                rec.main_rx_torque_command    = main_cmd.torque_command_2022;
+                rec.main_rx_torque_kp         = main_cmd.torque_kp;
+                rec.main_rx_torque_max_out    = main_cmd.torque_loop_max_output;
+                rec.main_rx_torque_min_out    = main_cmd.torque_loop_min_output;
+                rec.main_rx_vel_kp            = main_cmd.velocity_loop_kp;
+                rec.main_rx_vel_ki            = main_cmd.velocity_loop_ki;
+                rec.main_rx_vel_kd            = main_cmd.velocity_loop_kd;
+                rec.main_rx_pos_kp            = main_cmd.position_loop_kp;
+                rec.main_rx_pos_ki            = main_cmd.position_loop_ki;
+                rec.main_rx_pos_kd            = main_cmd.position_loop_kd;
+                rec.main_rx_enable            = main_cmd.enable_drive;
+
+                // dut rx
+                rec.dut_rx_mode_of_operation  = static_cast<int8_t>(dut_cmd.mode_of_operation);
+                rec.dut_rx_target_position    = static_cast<int32_t>(dut_cmd.target_position_rad);
+                rec.dut_rx_target_velocity    = static_cast<int32_t>(dut_cmd.target_velocity_rad_s);
+                rec.dut_rx_torque_command     = dut_cmd.torque_command_2022;
+                rec.dut_rx_torque_kp          = dut_cmd.torque_kp;
+                rec.dut_rx_torque_max_out     = dut_cmd.torque_loop_max_output;
+                rec.dut_rx_torque_min_out     = dut_cmd.torque_loop_min_output;
+                rec.dut_rx_vel_kp             = dut_cmd.velocity_loop_kp;
+                rec.dut_rx_vel_ki             = dut_cmd.velocity_loop_ki;
+                rec.dut_rx_vel_kd             = dut_cmd.velocity_loop_kd;
+                rec.dut_rx_pos_kp             = dut_cmd.position_loop_kp;
+                rec.dut_rx_pos_ki             = dut_cmd.position_loop_ki;
+                rec.dut_rx_pos_kd             = dut_cmd.position_loop_kd;
+                rec.dut_rx_enable             = dut_cmd.enable_drive;
+
+                // sensors
+                rec.encoder_count  = enc;
+                rec.torque_ch1_nm  = static_cast<float>(ch1_t);
+                rec.torque_ch2_nm  = static_cast<float>(ch2_t);
+
+                log_buf.push(rec);
+            }
+
             if (debug_print) {
                 // main_drive
                 auto main_it = status.by_slave.find(drive_slave);
@@ -652,6 +863,11 @@ int main(int argc, char** argv) {
 
     loop.stop();
     master.close();
+
+    // Drain remaining log records and flush quill's async backend.
+    log_drain.join();
+    quill::Backend::stop();
+    RCLCPP_INFO(node->get_logger(), "PDO log flushed: %s", log_path.c_str());
 
     executor->cancel();
     ros_thread.join();
