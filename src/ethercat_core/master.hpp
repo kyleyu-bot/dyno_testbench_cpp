@@ -35,9 +35,8 @@ struct SlaveConfig {
     std::vector<PdoMappingEntry> pdo_mapping;
 
     struct Scaling {
-        float torque_lsb_per_nm      = 10.0f;
-        float velocity_lsb_per_rad_s = 1000.0f;
-        float position_lsb_per_rad   = 10000.0f;
+        int output_encoder_res_bits  = 20;
+        int input_encoder_res_bits   = 20;
     } scaling;
 };
 

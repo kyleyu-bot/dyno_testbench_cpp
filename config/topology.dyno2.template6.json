@@ -11,9 +11,8 @@
       "vendor_id": 668,
       "product_code": 262344705,
       "scaling": {
-        "torque_lsb_per_nm": 10.0,
-        "velocity_lsb_per_rad_s": 1000.0,
-        "position_lsb_per_rad": 10000.0
+        "output_encoder_res_bits": 20,
+        "input_encoder_res_bits": 20
       },
       "pdo_mapping": [
         { "index": 7186, "subindex": 0, "value": 0, "size": 1 },
@@ -110,9 +109,8 @@
       "vendor_id": 668,
       "product_code": 262344705,
       "scaling": {
-        "torque_lsb_per_nm": 10.0,
-        "velocity_lsb_per_rad_s": 1000.0,
-        "position_lsb_per_rad": 10000.0
+        "output_encoder_res_bits": 20,
+        "input_encoder_res_bits": 20
       },
       "pdo_mapping": [
         { "index": 7186, "subindex": 0, "value": 0, "size": 1 },

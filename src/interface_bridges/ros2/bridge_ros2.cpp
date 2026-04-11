@@ -63,6 +63,7 @@ extern "C" {
 #include <quill/sinks/FileSink.h>
 
 #include <algorithm>
+#include <cmath>
 #include <any>
 #include <atomic>
 #include <chrono>
@@ -625,6 +626,13 @@ int main(int argc, char** argv) {
     RCLCPP_INFO(node->get_logger(),
         "bridge_ros2 running | pub_hz=%.1f fault_reset=%.1fs", pub_hz, fault_reset_s);
 
+    // Extract encoder resolution from topology scaling config.
+    int main_out_enc_bits = 20, dut_out_enc_bits = 20;
+    for (const auto& sc : cfg.slaves) {
+        if (sc.name == drive_slave) main_out_enc_bits = sc.scaling.output_encoder_res_bits;
+        if (sc.name == dut_slave)   dut_out_enc_bits  = sc.scaling.output_encoder_res_bits;
+    }
+
     const auto   t0           = std::chrono::steady_clock::now();
     const auto   reset_end    = t0 + std::chrono::duration<double>(fault_reset_s);
     const double pub_period   = 1.0 / std::max(pub_hz, 1.0);
@@ -633,21 +641,29 @@ int main(int argc, char** argv) {
     auto make_drive_json = [&](const std::string& slave_name,
                                 int soem_idx,
                                 int32_t cmd_vel,
-                                const SystemStatus& status) -> std::string {
+                                const SystemStatus& status,
+                                int out_enc_bits) -> std::string {
         json j;
         j["al"] = alStateName(static_cast<int>(ec_slave[soem_idx].state));
         auto it = status.by_slave.find(slave_name);
         if (it != status.by_slave.end() && it->second.has_value()) {
             const auto& ds = std::any_cast<const DriveStatus&>(it->second);
             j["state"]            = cia402Name(ds.cia402_state);
-            j["cmd_vel"]          = cmd_vel;
-            j["fb_vel"]           = ds.measured_input_side_velocity_raw;
+            j["cmd_vel_rev_per_s"]  = cmd_vel;
+            j["cmd_vel_rad_per_s"]  = static_cast<double>(cmd_vel) * (2.0 * M_PI);
+            j["fb_vel_raw"]       = ds.measured_input_side_velocity_raw;
+            j["fb_vel_rad_per_s"] = static_cast<double>(ds.measured_input_side_velocity_raw)
+                                    * (2.0 * M_PI / 1000.0);
             j["mode"]             = static_cast<int>(ds.mode_of_operation_display);
             j["sw"]               = ds.status_word;
             j["err"]              = ds.error_code;
-            j["output_pos"]       = ds.measured_output_side_position_raw_cnt;
+            j["output_enc_pos_raw_cnt"] = ds.measured_output_side_position_raw_cnt;
+            j["output_pos_rad"]   = static_cast<double>(ds.measured_output_side_position_raw_cnt)
+                                    * (2.0 * M_PI / static_cast<double>(1LL << out_enc_bits));
             j["in_enc_pos"]       = ds.input_encoder_pos;
-            j["pos_setpoint"]     = ds.position_setpoint;
+            j["pos_setpoint_raw_enc_cnt"] = ds.position_setpoint;
+            j["pos_setpoint_rad"] = static_cast<double>(ds.position_setpoint)
+                                    * (2.0 * M_PI / static_cast<double>(1LL << out_enc_bits));
             j["fb_torque"]        = ds.measured_torque_nm;
             j["bus_voltage"]      = ds.bus_voltage;
             j["motor_temp"]       = ds.motor_temp;
@@ -735,9 +751,9 @@ int main(int argc, char** argv) {
             const LoopStats    stats  = loop.stats();
 
             const std::string main_json = make_drive_json(
-                drive_slave, drive_soem_idx, cmd.main_speed, status);
+                drive_slave, drive_soem_idx, cmd.main_speed, status, main_out_enc_bits);
             const std::string dut_json = make_drive_json(
-                dut_slave, dut_soem_idx, cmd.dut_speed, status);
+                dut_slave, dut_soem_idx, cmd.dut_speed, status, dut_out_enc_bits);
 
             uint32_t enc = 0;
             auto enc_it = status.by_slave.find(encoder_slave);
