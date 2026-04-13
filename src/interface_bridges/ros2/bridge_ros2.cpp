@@ -650,7 +650,7 @@ int main(int argc, char** argv) {
             const auto& ds = std::any_cast<const DriveStatus&>(it->second);
             j["state"]            = cia402Name(ds.cia402_state);
             j["cmd_vel_rev_per_s"]  = cmd_vel;
-            j["cmd_vel_rad_per_s"]  = static_cast<double>(cmd_vel) * (2.0 * M_PI);
+            j["cmd_vel_rad_per_s"]  = static_cast<double>(cmd_vel) * (2.0 * M_PI) / 1000.0;
             j["fb_vel_raw"]       = ds.measured_input_side_velocity_raw;
             j["fb_vel_rad_per_s"] = static_cast<double>(ds.measured_input_side_velocity_raw)
                                     * (2.0 * M_PI / 1000.0);
