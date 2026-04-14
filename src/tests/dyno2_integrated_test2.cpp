@@ -316,7 +316,7 @@ static Command buildDriveCmd(ModeOfOperation mode, int32_t speed,
                               const DriveGains& g) {
     Command cmd;
     cmd.mode_of_operation      = mode;
-    cmd.target_velocity_rad_s  = static_cast<float>(speed);
+    cmd.target_velocity_mrevs  = static_cast<float>(speed);
     cmd.torque_kp              = g.torque_kp;
     cmd.torque_loop_max_output = g.vel_qr;
     cmd.torque_loop_min_output = g.vel_is;

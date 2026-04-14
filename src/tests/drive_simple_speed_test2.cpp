@@ -353,7 +353,7 @@ int main(int argc, char** argv) {
 
         Command cmd;
         cmd.mode_of_operation      = cmd_mode;
-        cmd.target_velocity_rad_s  = static_cast<float>(speed_cmd);
+        cmd.target_velocity_mrevs  = static_cast<float>(speed_cmd);
         cmd.torque_kp              = torque_kp;
         cmd.torque_loop_max_output = vel_qr;
         cmd.torque_loop_min_output = vel_is;

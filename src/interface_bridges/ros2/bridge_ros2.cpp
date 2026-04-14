@@ -64,6 +64,7 @@ extern "C" {
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <any>
 #include <atomic>
 #include <chrono>
@@ -106,10 +107,10 @@ static constexpr double      DEFAULT_FAULT_RESET   = 0.5;
 // ── Shared command state (written by ROS2 subscriber, read by main loop) ──────
 
 struct CommandState {
-    int32_t  main_speed    = 0;
-    int32_t  dut_speed     = 0;
-    int32_t  main_position = 0;
-    int32_t  dut_position  = 0;
+    float    main_speed    = 0.0f;  // rad/s, converted to mrev/s before sending
+    float    dut_speed     = 0.0f;
+    float    main_position = 0.0f;  // rad, converted to enc_cnt before sending
+    float    dut_position  = 0.0f;
     float    main_torque   = 0.0f;
     float    dut_torque    = 0.0f;
     float    main_current  = 0.0f;
@@ -120,6 +121,25 @@ struct CommandState {
     bool     hold_output1  = false;
     int8_t   main_mode     = static_cast<int8_t>(ModeOfOperation::CYCLIC_SYNC_VELOCITY);
     int8_t   dut_mode      = static_cast<int8_t>(ModeOfOperation::CYCLIC_SYNC_VELOCITY);
+    // Control gains (seeded from startup SDO; overridable via /dyno/command)
+    float    main_torque_kp       = 0.0f;
+    float    main_torque_max_out  = 0.0f;
+    float    main_torque_min_out  = 0.0f;
+    float    main_vel_kp          = 0.0f;
+    float    main_vel_ki          = 0.0f;
+    float    main_vel_kd          = 0.0f;
+    float    main_pos_kp          = 0.0f;
+    float    main_pos_ki          = 0.0f;
+    float    main_pos_kd          = 0.0f;
+    float    dut_torque_kp        = 0.0f;
+    float    dut_torque_max_out   = 0.0f;
+    float    dut_torque_min_out   = 0.0f;
+    float    dut_vel_kp           = 0.0f;
+    float    dut_vel_ki           = 0.0f;
+    float    dut_vel_kd           = 0.0f;
+    float    dut_pos_kp           = 0.0f;
+    float    dut_pos_ki           = 0.0f;
+    float    dut_pos_kd           = 0.0f;
 };
 
 static std::mutex      g_cmd_mutex;
@@ -161,10 +181,10 @@ public:
                 try {
                     const json j = json::parse(msg->data);
                     std::lock_guard<std::mutex> lk(g_cmd_mutex);
-                    g_cmd_state.main_speed    = j.value("main_velocity", j.value("main_speed", 0));
-                    g_cmd_state.dut_speed     = j.value("dut_velocity",  j.value("dut_speed",  0));
-                    g_cmd_state.main_position = j.value("main_position", 0);
-                    g_cmd_state.dut_position  = j.value("dut_position",  0);
+                    g_cmd_state.main_speed    = j.value("main_velocity", j.value("main_speed", 0.0f));
+                    g_cmd_state.dut_speed     = j.value("dut_velocity",  j.value("dut_speed",  0.0f));
+                    g_cmd_state.main_position = j.value("main_position", 0.0f);
+                    g_cmd_state.dut_position  = j.value("dut_position",  0.0f);
                     g_cmd_state.main_torque   = j.value("main_torque",   0.0f);
                     g_cmd_state.dut_torque    = j.value("dut_torque",    0.0f);
                     g_cmd_state.main_current  = j.value("main_current",  0.0f);
@@ -175,6 +195,25 @@ public:
                     g_cmd_state.hold_output1  = j.value("hold_output1",  false);
                     g_cmd_state.main_mode     = static_cast<int8_t>(j.value("main_mode", static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
                     g_cmd_state.dut_mode      = static_cast<int8_t>(j.value("dut_mode",  static_cast<int>(ModeOfOperation::CYCLIC_SYNC_VELOCITY)));
+                    // Gains: use current value as default so omitted fields persist
+                    g_cmd_state.main_torque_kp      = j.value("main_torque_kp",      g_cmd_state.main_torque_kp);
+                    g_cmd_state.main_torque_max_out = j.value("main_torque_max",      g_cmd_state.main_torque_max_out);
+                    g_cmd_state.main_torque_min_out = j.value("main_torque_min",      g_cmd_state.main_torque_min_out);
+                    g_cmd_state.main_vel_kp         = j.value("main_vel_kp",          g_cmd_state.main_vel_kp);
+                    g_cmd_state.main_vel_ki         = j.value("main_vel_ki",          g_cmd_state.main_vel_ki);
+                    g_cmd_state.main_vel_kd         = j.value("main_vel_kd",          g_cmd_state.main_vel_kd);
+                    g_cmd_state.main_pos_kp         = j.value("main_pos_kp",          g_cmd_state.main_pos_kp);
+                    g_cmd_state.main_pos_ki         = j.value("main_pos_ki",          g_cmd_state.main_pos_ki);
+                    g_cmd_state.main_pos_kd         = j.value("main_pos_kd",          g_cmd_state.main_pos_kd);
+                    g_cmd_state.dut_torque_kp       = j.value("dut_torque_kp",        g_cmd_state.dut_torque_kp);
+                    g_cmd_state.dut_torque_max_out  = j.value("dut_torque_max",       g_cmd_state.dut_torque_max_out);
+                    g_cmd_state.dut_torque_min_out  = j.value("dut_torque_min",       g_cmd_state.dut_torque_min_out);
+                    g_cmd_state.dut_vel_kp          = j.value("dut_vel_kp",           g_cmd_state.dut_vel_kp);
+                    g_cmd_state.dut_vel_ki          = j.value("dut_vel_ki",           g_cmd_state.dut_vel_ki);
+                    g_cmd_state.dut_vel_kd          = j.value("dut_vel_kd",           g_cmd_state.dut_vel_kd);
+                    g_cmd_state.dut_pos_kp          = j.value("dut_pos_kp",           g_cmd_state.dut_pos_kp);
+                    g_cmd_state.dut_pos_ki          = j.value("dut_pos_ki",           g_cmd_state.dut_pos_ki);
+                    g_cmd_state.dut_pos_kd          = j.value("dut_pos_kd",           g_cmd_state.dut_pos_kd);
                 } catch (...) {
                     RCLCPP_WARN(get_logger(), "Failed to parse /dyno/command JSON");
                 }
@@ -422,6 +461,30 @@ int main(int argc, char** argv) {
     const DriveGains main_gains = extractGains(drive_slave);
     const DriveGains dut_gains  = extractGains(dut_slave);
 
+    // Seed g_cmd_state gains from startup SDO values so they persist even when
+    // the command topic doesn't explicitly send gain fields.
+    {
+        std::lock_guard<std::mutex> lk(g_cmd_mutex);
+        g_cmd_state.main_torque_kp      = main_gains.torque_kp;
+        g_cmd_state.main_torque_max_out = main_gains.torque_loop_max_output;
+        g_cmd_state.main_torque_min_out = main_gains.torque_loop_min_output;
+        g_cmd_state.main_vel_kp         = main_gains.velocity_loop_kp;
+        g_cmd_state.main_vel_ki         = main_gains.velocity_loop_ki;
+        g_cmd_state.main_vel_kd         = main_gains.velocity_loop_kd;
+        g_cmd_state.main_pos_kp         = main_gains.position_loop_kp;
+        g_cmd_state.main_pos_ki         = main_gains.position_loop_ki;
+        g_cmd_state.main_pos_kd         = main_gains.position_loop_kd;
+        g_cmd_state.dut_torque_kp       = dut_gains.torque_kp;
+        g_cmd_state.dut_torque_max_out  = dut_gains.torque_loop_max_output;
+        g_cmd_state.dut_torque_min_out  = dut_gains.torque_loop_min_output;
+        g_cmd_state.dut_vel_kp          = dut_gains.velocity_loop_kp;
+        g_cmd_state.dut_vel_ki          = dut_gains.velocity_loop_ki;
+        g_cmd_state.dut_vel_kd          = dut_gains.velocity_loop_kd;
+        g_cmd_state.dut_pos_kp          = dut_gains.position_loop_kp;
+        g_cmd_state.dut_pos_ki          = dut_gains.position_loop_ki;
+        g_cmd_state.dut_pos_kd          = dut_gains.position_loop_kd;
+    }
+
     RCLCPP_INFO(node->get_logger(),
         "[main_drive] vel_kp=%.4f vel_ki=%.4f torque_kp=%.4f",
         static_cast<double>(main_gains.velocity_loop_kp),
@@ -640,17 +703,19 @@ int main(int argc, char** argv) {
 
     auto make_drive_json = [&](const std::string& slave_name,
                                 int soem_idx,
-                                int32_t cmd_vel,
+                                float cmd_vel_rad_s,
                                 const SystemStatus& status,
-                                int out_enc_bits) -> std::string {
+                                int out_enc_bits,
+                                const DriveGains& gains) -> std::string {
         json j;
         j["al"] = alStateName(static_cast<int>(ec_slave[soem_idx].state));
         auto it = status.by_slave.find(slave_name);
         if (it != status.by_slave.end() && it->second.has_value()) {
             const auto& ds = std::any_cast<const DriveStatus&>(it->second);
+            const double enc_to_rad = 2.0 * M_PI / static_cast<double>(1LL << out_enc_bits);
             j["state"]            = cia402Name(ds.cia402_state);
-            j["cmd_vel_rev_per_s"]  = cmd_vel;
-            j["cmd_vel_rad_per_s"]  = static_cast<double>(cmd_vel) * (2.0 * M_PI) / 1000.0;
+            j["cmd_vel_rev_per_s"]  = static_cast<double>(cmd_vel_rad_s) / (2.0 * M_PI);
+            j["cmd_vel_rad_per_s"]  = static_cast<double>(cmd_vel_rad_s);
             j["fb_vel_raw"]       = ds.measured_input_side_velocity_raw;
             j["fb_vel_rad_per_s"] = static_cast<double>(ds.measured_input_side_velocity_raw)
                                     * (2.0 * M_PI / 1000.0);
@@ -659,11 +724,10 @@ int main(int argc, char** argv) {
             j["err"]              = ds.error_code;
             j["output_enc_pos_raw_cnt"] = ds.measured_output_side_position_raw_cnt;
             j["output_pos_rad"]   = static_cast<double>(ds.measured_output_side_position_raw_cnt)
-                                    * (2.0 * M_PI / static_cast<double>(1LL << out_enc_bits));
+                                    * enc_to_rad;
             j["in_enc_pos"]       = ds.input_encoder_pos;
             j["pos_setpoint_raw_enc_cnt"] = ds.position_setpoint;
-            j["pos_setpoint_rad"] = static_cast<double>(ds.position_setpoint)
-                                    * (2.0 * M_PI / static_cast<double>(1LL << out_enc_bits));
+            j["pos_setpoint_rad"] = static_cast<double>(ds.position_setpoint) * enc_to_rad;
             j["fb_torque"]        = ds.measured_torque_nm;
             j["bus_voltage"]      = ds.bus_voltage;
             j["motor_temp"]       = ds.motor_temp;
@@ -672,9 +736,27 @@ int main(int argc, char** argv) {
             j["idc_actual"]       = ds.idc_actual;
             j["iq_command"]       = ds.iq_command;
             j["id_command"]       = ds.id_command;
+            // Limits in natural units for GUI slider ranging
+            j["max_velocity_abs_rad_s"] = static_cast<double>(ds.max_velocity_abs)
+                                          * (2.0 * M_PI / 1000.0);
+            j["min_position_rad"] = (ds.min_position == std::numeric_limits<int32_t>::min())
+                ? -1000.0 : static_cast<double>(ds.min_position) * enc_to_rad;
+            j["max_position_rad"] = (ds.max_position == std::numeric_limits<int32_t>::max())
+                ?  1000.0 : static_cast<double>(ds.max_position) * enc_to_rad;
+            // Keep raw limits for backward compat
             j["max_velocity_abs"] = ds.max_velocity_abs;
             j["min_position"]     = ds.min_position;
             j["max_position"]     = ds.max_position;
+            // Control gains (current values being sent to drive)
+            j["torque_kp"]    = static_cast<double>(gains.torque_kp);
+            j["torque_max"]   = static_cast<double>(gains.torque_loop_max_output);
+            j["torque_min"]   = static_cast<double>(gains.torque_loop_min_output);
+            j["vel_kp"]       = static_cast<double>(gains.velocity_loop_kp);
+            j["vel_ki"]       = static_cast<double>(gains.velocity_loop_ki);
+            j["vel_kd"]       = static_cast<double>(gains.velocity_loop_kd);
+            j["pos_kp"]       = static_cast<double>(gains.position_loop_kp);
+            j["pos_ki"]       = static_cast<double>(gains.position_loop_ki);
+            j["pos_kd"]       = static_cast<double>(gains.position_loop_kd);
         } else {
             j["state"] = "unavailable";
         }
@@ -700,41 +782,45 @@ int main(int argc, char** argv) {
         }
 
         // Build EtherCAT commands.
+        // velocity: rad/s → mrev/s;  position: rad → encoder counts
+        static constexpr float TWO_PI = 2.0f * static_cast<float>(M_PI);
         Command main_cmd;
-        main_cmd.mode_of_operation      = static_cast<ModeOfOperation>(cmd.main_mode);
-        main_cmd.target_velocity_rad_s  = static_cast<float>(cmd.main_speed);
-        main_cmd.target_position_rad    = static_cast<float>(cmd.main_position);
-        main_cmd.target_torque_nm       = cmd.main_torque;
-        main_cmd.torque_command_2022    = cmd.main_current;
-        main_cmd.enable_drive           = !in_reset && cmd.main_enable;
-        main_cmd.clear_fault            = in_reset || cmd.fault_reset;
-        main_cmd.torque_kp              = main_gains.torque_kp;
-        main_cmd.torque_loop_max_output = main_gains.torque_loop_max_output;
-        main_cmd.torque_loop_min_output = main_gains.torque_loop_min_output;
-        main_cmd.velocity_loop_kp       = main_gains.velocity_loop_kp;
-        main_cmd.velocity_loop_ki       = main_gains.velocity_loop_ki;
-        main_cmd.velocity_loop_kd       = main_gains.velocity_loop_kd;
-        main_cmd.position_loop_kp       = main_gains.position_loop_kp;
-        main_cmd.position_loop_ki       = main_gains.position_loop_ki;
-        main_cmd.position_loop_kd       = main_gains.position_loop_kd;
+        main_cmd.mode_of_operation       = static_cast<ModeOfOperation>(cmd.main_mode);
+        main_cmd.target_velocity_mrevs    = cmd.main_speed * 1000.0f / TWO_PI;
+        main_cmd.target_position__enc_cnt = cmd.main_position
+                                            * static_cast<float>(1LL << main_out_enc_bits) / TWO_PI;
+        main_cmd.target_torque_nm        = cmd.main_torque;
+        main_cmd.torque_command_2022     = cmd.main_current;
+        main_cmd.enable_drive            = !in_reset && cmd.main_enable;
+        main_cmd.clear_fault             = in_reset || cmd.fault_reset;
+        main_cmd.torque_kp               = cmd.main_torque_kp;
+        main_cmd.torque_loop_max_output  = cmd.main_torque_max_out;
+        main_cmd.torque_loop_min_output  = cmd.main_torque_min_out;
+        main_cmd.velocity_loop_kp        = cmd.main_vel_kp;
+        main_cmd.velocity_loop_ki        = cmd.main_vel_ki;
+        main_cmd.velocity_loop_kd        = cmd.main_vel_kd;
+        main_cmd.position_loop_kp        = cmd.main_pos_kp;
+        main_cmd.position_loop_ki        = cmd.main_pos_ki;
+        main_cmd.position_loop_kd        = cmd.main_pos_kd;
 
         Command dut_cmd;
-        dut_cmd.mode_of_operation      = static_cast<ModeOfOperation>(cmd.dut_mode);
-        dut_cmd.target_velocity_rad_s  = static_cast<float>(cmd.dut_speed);
-        dut_cmd.target_position_rad    = static_cast<float>(cmd.dut_position);
-        dut_cmd.target_torque_nm       = cmd.dut_torque;
-        dut_cmd.torque_command_2022    = cmd.dut_current;
-        dut_cmd.enable_drive           = !in_reset && cmd.dut_enable;
-        dut_cmd.clear_fault            = in_reset || cmd.fault_reset;
-        dut_cmd.torque_kp              = dut_gains.torque_kp;
-        dut_cmd.torque_loop_max_output = dut_gains.torque_loop_max_output;
-        dut_cmd.torque_loop_min_output = dut_gains.torque_loop_min_output;
-        dut_cmd.velocity_loop_kp       = dut_gains.velocity_loop_kp;
-        dut_cmd.velocity_loop_ki       = dut_gains.velocity_loop_ki;
-        dut_cmd.velocity_loop_kd       = dut_gains.velocity_loop_kd;
-        dut_cmd.position_loop_kp       = dut_gains.position_loop_kp;
-        dut_cmd.position_loop_ki       = dut_gains.position_loop_ki;
-        dut_cmd.position_loop_kd       = dut_gains.position_loop_kd;
+        dut_cmd.mode_of_operation       = static_cast<ModeOfOperation>(cmd.dut_mode);
+        dut_cmd.target_velocity_mrevs    = cmd.dut_speed * 1000.0f / TWO_PI;
+        dut_cmd.target_position__enc_cnt = cmd.dut_position
+                                           * static_cast<float>(1LL << dut_out_enc_bits) / TWO_PI;
+        dut_cmd.target_torque_nm        = cmd.dut_torque;
+        dut_cmd.torque_command_2022     = cmd.dut_current;
+        dut_cmd.enable_drive            = !in_reset && cmd.dut_enable;
+        dut_cmd.clear_fault             = in_reset || cmd.fault_reset;
+        dut_cmd.torque_kp               = cmd.dut_torque_kp;
+        dut_cmd.torque_loop_max_output  = cmd.dut_torque_max_out;
+        dut_cmd.torque_loop_min_output  = cmd.dut_torque_min_out;
+        dut_cmd.velocity_loop_kp        = cmd.dut_vel_kp;
+        dut_cmd.velocity_loop_ki        = cmd.dut_vel_ki;
+        dut_cmd.velocity_loop_kd        = cmd.dut_vel_kd;
+        dut_cmd.position_loop_kp        = cmd.dut_pos_kp;
+        dut_cmd.position_loop_ki        = cmd.dut_pos_ki;
+        dut_cmd.position_loop_kd        = cmd.dut_pos_kd;
 
         beckhoff::el2004::Command io_cmd;
         io_cmd.output_1 = cmd.hold_output1;
@@ -750,10 +836,32 @@ int main(int argc, char** argv) {
             const SystemStatus status = loop.getStatus();
             const LoopStats    stats  = loop.stats();
 
+            DriveGains cmd_main_gains;
+            cmd_main_gains.torque_kp              = cmd.main_torque_kp;
+            cmd_main_gains.torque_loop_max_output = cmd.main_torque_max_out;
+            cmd_main_gains.torque_loop_min_output = cmd.main_torque_min_out;
+            cmd_main_gains.velocity_loop_kp       = cmd.main_vel_kp;
+            cmd_main_gains.velocity_loop_ki       = cmd.main_vel_ki;
+            cmd_main_gains.velocity_loop_kd       = cmd.main_vel_kd;
+            cmd_main_gains.position_loop_kp       = cmd.main_pos_kp;
+            cmd_main_gains.position_loop_ki       = cmd.main_pos_ki;
+            cmd_main_gains.position_loop_kd       = cmd.main_pos_kd;
+
+            DriveGains cmd_dut_gains;
+            cmd_dut_gains.torque_kp               = cmd.dut_torque_kp;
+            cmd_dut_gains.torque_loop_max_output  = cmd.dut_torque_max_out;
+            cmd_dut_gains.torque_loop_min_output  = cmd.dut_torque_min_out;
+            cmd_dut_gains.velocity_loop_kp        = cmd.dut_vel_kp;
+            cmd_dut_gains.velocity_loop_ki        = cmd.dut_vel_ki;
+            cmd_dut_gains.velocity_loop_kd        = cmd.dut_vel_kd;
+            cmd_dut_gains.position_loop_kp        = cmd.dut_pos_kp;
+            cmd_dut_gains.position_loop_ki        = cmd.dut_pos_ki;
+            cmd_dut_gains.position_loop_kd        = cmd.dut_pos_kd;
+
             const std::string main_json = make_drive_json(
-                drive_slave, drive_soem_idx, cmd.main_speed, status, main_out_enc_bits);
+                drive_slave, drive_soem_idx, cmd.main_speed, status, main_out_enc_bits, cmd_main_gains);
             const std::string dut_json = make_drive_json(
-                dut_slave, dut_soem_idx, cmd.dut_speed, status, dut_out_enc_bits);
+                dut_slave, dut_soem_idx, cmd.dut_speed, status, dut_out_enc_bits, cmd_dut_gains);
 
             uint32_t enc = 0;
             auto enc_it = status.by_slave.find(encoder_slave);
