@@ -1197,7 +1197,7 @@ def main():
     # ── Cleanup ───────────────────────────────────────────────────────────────
     print("[dyno_gui] Window closed — shutting down.")
     commander.set_command(
-        numeric={k: 0 for k in ALL_CMD_KEYS},
+        numeric={k: 0 for k in ALL_CMD_KEYS if k not in GAIN_FIELDS},
         main_enable=False, dut_enable=False, hold_output1=False)
     time.sleep(0.1)
 
