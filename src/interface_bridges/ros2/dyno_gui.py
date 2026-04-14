@@ -24,6 +24,8 @@ Controls:
 """
 
 import argparse
+import importlib.util
+import inspect
 import json
 import os
 import signal
@@ -31,16 +33,19 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 
 # ── Qt ────────────────────────────────────────────────────────────────────────
 try:
     from PyQt5.QtCore    import Qt, QTimer, QMimeData, QByteArray
+    from PyQt5.QtGui     import QFont
     from PyQt5.QtWidgets import (
         QApplication, QMainWindow, QWidget,
         QVBoxLayout, QHBoxLayout, QSplitter,
         QSlider, QPushButton, QLabel, QGroupBox,
         QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem,
-        QMenu, QAction, QComboBox,
+        QMenu, QAction, QComboBox, QTextEdit, QFormLayout,
+        QScrollArea, QSizePolicy,
     )
 except ImportError:
     print("ERROR: PyQt5 not found.  pip install PyQt5", file=sys.stderr)
@@ -57,9 +62,10 @@ except ImportError:
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-DEFAULT_BRIDGE   = "build/dyno_ros2_bridge/bridge_ros2"
-DEFAULT_TOPOLOGY = "config/topology.dyno2.template6.json"
-DEFAULT_PUB_HZ   = 200.0
+DEFAULT_BRIDGE      = "build/dyno_ros2_bridge/bridge_ros2"
+DEFAULT_TOPOLOGY    = "config/topology.dyno2.template6.json"
+DEFAULT_PUB_HZ      = 200.0
+TEST_SCRIPTS_DIR    = "src/dyno_test_scripts"  # scanned for *.py test scripts
 DEFAULT_FAULT_S  = 2.0
 
 CMD_MIME  = "application/x-dyno-command-field"
@@ -121,6 +127,74 @@ DS402_DEFAULT_MODE = 9   # Cyclic Sync Velocity
 MAIN_ZERO_FIELDS = ["main_velocity", "main_position", "main_torque", "main_current"]
 DUT_ZERO_FIELDS  = ["dut_velocity",  "dut_position",  "dut_torque",  "dut_current"]
 ALL_CMD_KEYS     = [k for k, _ in COMMAND_FIELDS]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test script discovery and execution
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _discover_scripts(scripts_dir: str) -> list[str]:
+    """Return sorted list of *.py paths in scripts_dir, newest first."""
+    if not os.path.isdir(scripts_dir):
+        return []
+    paths = [
+        os.path.join(scripts_dir, f)
+        for f in os.listdir(scripts_dir)
+        if f.endswith(".py") and not f.startswith("_")
+    ]
+    return sorted(paths, key=lambda p: os.path.getmtime(p), reverse=True)
+
+
+def _load_script_module(path: str):
+    """
+    Dynamically load a test script module.
+    Scripts must define:
+        PARAMS: dict[str, float | int | str]  — editable parameters with defaults
+        run(params: dict, commander) -> None  — called in a background thread
+    """
+    spec = importlib.util.spec_from_file_location("_dyno_test_script", path)
+    mod  = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class ScriptRunner:
+    """Manages loading and running one test script at a time in a background thread."""
+
+    def __init__(self):
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._lock       = threading.Lock()
+
+    @property
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._thread is not None and self._thread.is_alive()
+
+    def run(self, path: str, params: dict, commander, on_done, on_log):
+        """
+        Start script in a background thread.
+        on_done(success: bool, msg: str) — called on completion (Qt-thread via QTimer)
+        on_log(line: str)                — called for each stdout line
+        """
+        if self.is_running:
+            return
+        self._stop_event.clear()
+        mod = _load_script_module(path)
+
+        def _target():
+            try:
+                mod.run(params, commander, self._stop_event)
+                on_done(True, "Completed successfully.")
+            except Exception:
+                on_done(False, traceback.format_exc())
+
+        self._thread = threading.Thread(target=_target, daemon=True)
+        self._thread.start()
+
+    def abort(self):
+        """Signal the running script to stop (sets stop_event)."""
+        self._stop_event.set()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -577,14 +651,208 @@ class SliderSlot(QGroupBox):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Scripting panel
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ScriptingPanel(QGroupBox):
+    """
+    Right-side panel for selecting and running Python test scripts.
+
+    Script protocol — each script file must define:
+        PARAMS = {"speed": 100, "duration_s": 5.0, ...}  # param name → default
+        def run(params: dict, commander: DynoCommander, stop_event: threading.Event):
+            ...  # check stop_event.is_set() regularly to support abort
+    """
+
+    def __init__(self, commander, scripts_dir: str, parent=None):
+        super().__init__("Test Scripts", parent)
+        self._commander    = commander
+        self._scripts_dir  = scripts_dir
+        self._runner       = ScriptRunner()
+        self._param_widgets: dict[str, QDoubleSpinBox | QSpinBox] = {}
+        self._current_mod  = None
+
+        # ── Script selector ───────────────────────────────────────────────────
+        self._script_combo = QComboBox()
+        self._script_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._script_combo.currentIndexChanged.connect(self._on_script_selected)
+
+        refresh_btn = QPushButton("↻")
+        refresh_btn.setFixedWidth(28)
+        refresh_btn.setToolTip("Rescan scripts folder")
+        refresh_btn.clicked.connect(self._scan_scripts)
+
+        selector_row = QHBoxLayout()
+        selector_row.addWidget(self._script_combo, 1)
+        selector_row.addWidget(refresh_btn)
+
+        # ── Parameters area ───────────────────────────────────────────────────
+        self._params_form   = QFormLayout()
+        self._params_form.setSpacing(4)
+        params_widget = QWidget()
+        params_widget.setLayout(self._params_form)
+
+        self._params_scroll = QScrollArea()
+        self._params_scroll.setWidget(params_widget)
+        self._params_scroll.setWidgetResizable(True)
+        self._params_scroll.setMinimumHeight(80)
+        self._params_scroll.setMaximumHeight(200)
+
+        # ── Buttons ───────────────────────────────────────────────────────────
+        self._run_btn = QPushButton("Run Test")
+        self._run_btn.setStyleSheet("background-color: #44cc44; font-weight: bold;")
+        self._run_btn.clicked.connect(self._run_script)
+
+        self._abort_btn = QPushButton("Abort")
+        self._abort_btn.setStyleSheet("background-color: #cc4444; font-weight: bold;")
+        self._abort_btn.setEnabled(False)
+        self._abort_btn.clicked.connect(self._abort_script)
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self._run_btn)
+        btn_row.addWidget(self._abort_btn)
+
+        # ── Output log ────────────────────────────────────────────────────────
+        self._log = QTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setMinimumHeight(80)
+        self._log.setFont(QFont("Monospace", 8))
+        self._log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # ── Layout ────────────────────────────────────────────────────────────
+        lay = QVBoxLayout(self)
+        lay.addLayout(selector_row)
+        lay.addWidget(QLabel("Parameters:"))
+        lay.addWidget(self._params_scroll)
+        lay.addLayout(btn_row)
+        lay.addWidget(QLabel("Output:"))
+        lay.addWidget(self._log, 1)
+
+        self._scan_scripts()
+
+    # ── Script discovery ──────────────────────────────────────────────────────
+
+    def _scan_scripts(self):
+        paths = _discover_scripts(self._scripts_dir)
+        prev  = self._script_combo.currentData()
+        self._script_combo.blockSignals(True)
+        self._script_combo.clear()
+        if not paths:
+            self._script_combo.addItem(f"(no scripts in {self._scripts_dir})", None)
+        for p in paths:
+            self._script_combo.addItem(os.path.basename(p), p)
+        # Restore selection if still present
+        idx = next((i for i in range(self._script_combo.count())
+                    if self._script_combo.itemData(i) == prev), 0)
+        self._script_combo.setCurrentIndex(idx)
+        self._script_combo.blockSignals(False)
+        self._on_script_selected(self._script_combo.currentIndex())
+
+    def _on_script_selected(self, idx: int):
+        path = self._script_combo.itemData(idx)
+        self._current_mod = None
+        self._clear_params()
+        if not path:
+            return
+        try:
+            mod = _load_script_module(path)
+            self._current_mod = mod
+            params = getattr(mod, "PARAMS", {})
+            self._build_params(params)
+        except Exception as e:
+            self._log_line(f"[load error] {e}")
+
+    # ── Parameter form ────────────────────────────────────────────────────────
+
+    def _clear_params(self):
+        while self._params_form.rowCount():
+            self._params_form.removeRow(0)
+        self._param_widgets.clear()
+
+    def _build_params(self, params: dict):
+        self._clear_params()
+        for name, default in params.items():
+            if isinstance(default, float):
+                w = QDoubleSpinBox()
+                w.setDecimals(4)
+                w.setRange(-1e9, 1e9)
+                w.setSingleStep(0.1)
+                w.setValue(default)
+            else:
+                w = QSpinBox()
+                w.setRange(-2**30, 2**30 - 1)
+                w.setValue(int(default))
+            self._param_widgets[name] = w
+            self._params_form.addRow(name + ":", w)
+
+    def _collect_params(self) -> dict:
+        return {name: w.value() for name, w in self._param_widgets.items()}
+
+    # ── Run / abort ───────────────────────────────────────────────────────────
+
+    def _run_script(self):
+        if self._current_mod is None or self._runner.is_running:
+            return
+
+        # Zero drives and set mode_of_operation to 0 before handing off to script
+        self._commander.set_command(
+            numeric     = {k: 0 for k in ALL_CMD_KEYS if k not in GAIN_FIELDS},
+            main_enable = False,
+            dut_enable  = False,
+            main_mode   = 0,
+            dut_mode    = 0,
+        )
+
+        params = self._collect_params()
+        self._log.clear()
+        self._log_line(f"[run] {self._script_combo.currentText()}")
+        self._log_line(f"[params] {params}")
+
+        self._run_btn.setEnabled(False)
+        self._abort_btn.setEnabled(True)
+
+        def _on_done(success: bool, msg: str):
+            QTimer.singleShot(0, lambda: self._on_script_done(success, msg))
+
+        self._runner.run(
+            path      = self._script_combo.currentData(),
+            params    = params,
+            commander = self._commander,
+            on_done   = _on_done,
+            on_log    = self._log_line,
+        )
+
+    def _abort_script(self):
+        self._runner.abort()
+        self._log_line("[abort] stop requested")
+
+    def _on_script_done(self, success: bool, msg: str):
+        self._run_btn.setEnabled(True)
+        self._abort_btn.setEnabled(False)
+        status = "OK" if success else "ERROR"
+        self._log_line(f"[{status}] {msg.strip()}")
+
+    # ── Log helper ────────────────────────────────────────────────────────────
+
+    def _log_line(self, text: str):
+        # Safe to call from any thread via QTimer.singleShot
+        def _append():
+            self._log.append(text)
+            self._log.verticalScrollBar().setValue(
+                self._log.verticalScrollBar().maximum())
+        QTimer.singleShot(0, _append)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Qt main window
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DynoWindow(QMainWindow):
 
-    def __init__(self, commander: DynoCommander):
+    def __init__(self, commander: DynoCommander, scripts_dir: str = TEST_SCRIPTS_DIR):
         super().__init__()
         self._cmd          = commander
+        self._scripts_dir  = scripts_dir
         self._main_enabled = False
         self._dut_enabled  = False
         self._hold_output1 = False
@@ -618,11 +886,17 @@ class DynoWindow(QMainWindow):
         for slot in self._slots:
             slots_lay.addWidget(slot)
 
-        # ── Right: hardcoded buttons ───────────────────────────────────────────
+        # ── Right panel: buttons + scripting side by side ─────────────────────
+        right_w   = QWidget()
+        right_lay = QHBoxLayout(right_w)
+        right_lay.setSpacing(6)
+        right_lay.setContentsMargins(0, 0, 0, 0)
+
+        # ── Buttons column ────────────────────────────────────────────────────
         btn_w   = QWidget()
         btn_lay = QVBoxLayout(btn_w)
         btn_lay.setSpacing(8)
-        btn_w.setFixedWidth(130)
+        btn_w.setFixedWidth(140)
 
         self._main_enable_btn = QPushButton("Main Enable")
         self._main_enable_btn.setCheckable(True)
@@ -678,11 +952,18 @@ class DynoWindow(QMainWindow):
         btn_lay.addWidget(fault_btn)
         btn_lay.addStretch()
 
+        # ── Scripting panel ───────────────────────────────────────────────────
+        self._script_panel = ScriptingPanel(self._cmd, self._scripts_dir)
+        self._script_panel.setMinimumWidth(280)
+
+        right_lay.addWidget(btn_w)
+        right_lay.addWidget(self._script_panel, 1)
+
         # ── Splitter ───────────────────────────────────────────────────────────
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._field_list)
         splitter.addWidget(slots_w)
-        splitter.addWidget(btn_w)
+        splitter.addWidget(right_w)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
@@ -828,7 +1109,7 @@ def main():
     # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
     window = DynoWindow(commander)
-    window.resize(700, 420)
+    window.resize(1400, 680)
 
     if bridge_proc is not None:
         window.set_status(f"bridge_ros2 PID {bridge_proc.pid}")
