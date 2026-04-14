@@ -61,6 +61,7 @@ JSON_TOPICS  = [
     "/dyno/main_drive/status",
     "/dyno/dut/status",
     "/dyno/loop/stats",
+    "/dyno/command",
 ]
 FLOAT_TOPICS = [
     "/dyno/torque/ch1",
@@ -204,6 +205,13 @@ class TopicBrowser(QTreeWidget):
 
         self._topic_items: dict[str, QTreeWidgetItem] = {}
         self._known:       dict[str, set[str]]        = {}
+
+        # Clicking anywhere on a topic row toggles expand/collapse.
+        self.itemClicked.connect(self._on_item_clicked)
+
+    def _on_item_clicked(self, item: QTreeWidgetItem, _col: int) -> None:
+        if item.parent() is None:   # top-level = topic row
+            item.setExpanded(not item.isExpanded())
 
     def refresh(self, fields: dict[str, list[str]]) -> None:
         for topic in sorted(fields):

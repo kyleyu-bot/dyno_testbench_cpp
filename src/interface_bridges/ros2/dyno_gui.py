@@ -664,13 +664,15 @@ class ScriptingPanel(QGroupBox):
             ...  # check stop_event.is_set() regularly to support abort
     """
 
-    def __init__(self, commander, scripts_dir: str, parent=None):
+    def __init__(self, commander, scripts_dir: str,
+                 on_script_active=None, parent=None):
         super().__init__("Test Scripts", parent)
-        self._commander    = commander
-        self._scripts_dir  = scripts_dir
-        self._runner       = ScriptRunner()
+        self._commander        = commander
+        self._scripts_dir      = scripts_dir
+        self._runner           = ScriptRunner()
         self._param_widgets: dict[str, QDoubleSpinBox | QSpinBox] = {}
-        self._current_mod  = None
+        self._current_mod      = None
+        self._on_script_active = on_script_active  # callable(bool) | None
 
         # ── Script selector ───────────────────────────────────────────────────
         self._script_combo = QComboBox()
@@ -802,6 +804,9 @@ class ScriptingPanel(QGroupBox):
             main_mode   = 0,
             dut_mode    = 0,
         )
+        # Pause GUI push — script now has exclusive control of set_command()
+        if self._on_script_active:
+            self._on_script_active(True)
 
         params = self._collect_params()
         self._log.clear()
@@ -814,21 +819,51 @@ class ScriptingPanel(QGroupBox):
         def _on_done(success: bool, msg: str):
             QTimer.singleShot(0, lambda: self._on_script_done(success, msg))
 
-        self._runner.run(
-            path      = self._script_combo.currentData(),
-            params    = params,
-            commander = self._commander,
-            on_done   = _on_done,
-            on_log    = self._log_line,
-        )
+        try:
+            self._runner.run(
+                path      = self._script_combo.currentData(),
+                params    = params,
+                commander = self._commander,
+                on_done   = _on_done,
+                on_log    = self._log_line,
+            )
+        except Exception as exc:
+            if self._on_script_active:
+                self._on_script_active(False)
+            self._run_btn.setEnabled(True)
+            self._abort_btn.setEnabled(False)
+            self._log_line(f"[error] Could not start script: {exc}")
+            return
+
+        # Thread started — poll for completion so UI is restored reliably
+        # regardless of whether QTimer.singleShot from the background thread fires.
+        QTimer.singleShot(100, self._poll_thread_done)
 
     def _abort_script(self):
         self._runner.abort()
         self._log_line("[abort] stop requested")
+        # Immediately restore GUI control (Main Enable, sliders) without waiting
+        # for the script thread to finish sleeping.
+        # _poll_thread_done (started by _run_script) will re-enable Run Test
+        # once the thread actually exits.
+        if self._on_script_active:
+            self._on_script_active(False)
+        self._abort_btn.setEnabled(False)
+
+    def _poll_thread_done(self) -> None:
+        """Poll every 100 ms until the background script thread has exited.
+        Authoritative UI restorer for both natural completion and abort."""
+        if self._runner.is_running:
+            QTimer.singleShot(100, self._poll_thread_done)
+        else:
+            # Idempotent — _on_script_active(False) may already be False (abort path).
+            if self._on_script_active:
+                self._on_script_active(False)
+            self._run_btn.setEnabled(True)
+            self._abort_btn.setEnabled(False)
 
     def _on_script_done(self, success: bool, msg: str):
-        self._run_btn.setEnabled(True)
-        self._abort_btn.setEnabled(False)
+        """Log-only — UI state is managed by _poll_thread_done."""
         status = "OK" if success else "ERROR"
         self._log_line(f"[{status}] {msg.strip()}")
 
@@ -851,11 +886,12 @@ class DynoWindow(QMainWindow):
 
     def __init__(self, commander: DynoCommander, scripts_dir: str = TEST_SCRIPTS_DIR):
         super().__init__()
-        self._cmd          = commander
-        self._scripts_dir  = scripts_dir
-        self._main_enabled = False
-        self._dut_enabled  = False
-        self._hold_output1 = False
+        self._cmd            = commander
+        self._scripts_dir    = scripts_dir
+        self._main_enabled   = False
+        self._dut_enabled    = False
+        self._hold_output1   = False
+        self._script_running = False
 
         self.setWindowTitle("Dyno Control")
         self._build_ui()
@@ -936,7 +972,7 @@ class DynoWindow(QMainWindow):
 
         fault_btn = QPushButton("Fault Reset")
         fault_btn.setStyleSheet("background-color: #f0a000; font-weight: bold;")
-        fault_btn.clicked.connect(self._cmd.pulse_fault_reset)
+        fault_btn.clicked.connect(self._fault_reset_pressed)
 
         btn_lay.addWidget(self._main_enable_btn)
         btn_lay.addWidget(main_zero_btn)
@@ -953,7 +989,10 @@ class DynoWindow(QMainWindow):
         btn_lay.addStretch()
 
         # ── Scripting panel ───────────────────────────────────────────────────
-        self._script_panel = ScriptingPanel(self._cmd, self._scripts_dir)
+        self._script_panel = ScriptingPanel(
+            self._cmd, self._scripts_dir,
+            on_script_active=self._on_script_active,
+        )
         self._script_panel.setMinimumWidth(280)
 
         right_lay.addWidget(btn_w)
@@ -1006,9 +1045,34 @@ class DynoWindow(QMainWindow):
             if slot.field in DUT_ZERO_FIELDS:
                 slot.zero()
 
+    # ── script handoff ────────────────────────────────────────────────────────
+
+    def _on_script_active(self, active: bool) -> None:
+        """Called by ScriptingPanel when a script starts (True) or finishes (False)."""
+        self._script_running = active
+        if not active:
+            # Uncheck both enable buttons so the drive is not automatically
+            # re-enabled when GUI push resumes after the script.
+            self._main_enabled = False
+            self._dut_enabled  = False
+            self._main_enable_btn.setChecked(False)
+            self._main_enable_btn.setText("Main Enable")
+            self._dut_enable_btn.setChecked(False)
+            self._dut_enable_btn.setText("DUT Enable")
+            # Push the now-disabled state once so the drive receives it immediately.
+            self._push_command()
+
+    def _fault_reset_pressed(self) -> None:
+        """Fault Reset button handler — blocked while a script is running."""
+        if self._script_running:
+            return   # must abort script before using fault reset
+        self._cmd.pulse_fault_reset()
+
     # ── publish ───────────────────────────────────────────────────────────────
 
     def _push_command(self):
+        if self._script_running:
+            return
         # Setpoint fields default to 0; gain fields are omitted unless a slider
         # is actively assigned to them (so the bridge keeps its SDO-seeded values).
         numeric = {k: 0 for k in ALL_CMD_KEYS if k not in GAIN_FIELDS}
@@ -1039,6 +1103,15 @@ class DynoWindow(QMainWindow):
 
     def set_status(self, text: str):
         self._status_label.setText(text)
+
+    def closeEvent(self, event):
+        """Abort any running script before closing so the cleanup zero command wins."""
+        if self._script_running:
+            self._script_panel._abort_script()
+            # Give the script thread a moment to see stop_event and stop sending
+            # enable=True before main() sends its zero command.
+            time.sleep(0.15)
+        event.accept()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
