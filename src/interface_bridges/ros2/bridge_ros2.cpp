@@ -140,6 +140,10 @@ struct CommandState {
     float    dut_pos_kp           = 0.0f;
     float    dut_pos_ki           = 0.0f;
     float    dut_pos_kd           = 0.0f;
+    // Torque sensor ADC scale (Nm); use current value as default so omitted
+    // command messages leave the scale unchanged.
+    float    ch1_torque_scale     = 200.0f;  // matches El3002Adapter ch1 default
+    float    ch2_torque_scale     = 20.0f;   // matches El3002Adapter ch2 default
 };
 
 static std::mutex      g_cmd_mutex;
@@ -214,6 +218,8 @@ public:
                     g_cmd_state.dut_pos_kp          = j.value("dut_pos_kp",           g_cmd_state.dut_pos_kp);
                     g_cmd_state.dut_pos_ki          = j.value("dut_pos_ki",           g_cmd_state.dut_pos_ki);
                     g_cmd_state.dut_pos_kd          = j.value("dut_pos_kd",           g_cmd_state.dut_pos_kd);
+                    g_cmd_state.ch1_torque_scale    = j.value("ch1_torque_scale",     g_cmd_state.ch1_torque_scale);
+                    g_cmd_state.ch2_torque_scale    = j.value("ch2_torque_scale",     g_cmd_state.ch2_torque_scale);
                 } catch (...) {
                     RCLCPP_WARN(get_logger(), "Failed to parse /dyno/command JSON");
                 }
@@ -779,6 +785,19 @@ int main(int argc, char** argv) {
         {
             std::lock_guard<std::mutex> lk(g_cmd_mutex);
             cmd = g_cmd_state;
+        }
+
+        // Apply torque sensor ADC scale to the adapter.
+        // Note: setCh1/2TorqueScale() writes ch1_torque_scale_ which is also read
+        // by the RT cycle callback's scaledTorqueCh1/2() — on x86_64, aligned float
+        // read/write is naturally atomic, so the worst case is one stale cycle during
+        // a user-initiated scale change. Acceptable for an infrequent measurement setting.
+        try {
+            el3002->setCh1TorqueScale(cmd.ch1_torque_scale);
+            el3002->setCh2TorqueScale(cmd.ch2_torque_scale);
+        } catch (const std::exception& e) {
+            RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 5000,
+                "Ignoring invalid torque scale value: %s", e.what());
         }
 
         // Build EtherCAT commands.

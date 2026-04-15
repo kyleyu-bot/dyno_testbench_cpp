@@ -124,6 +124,9 @@ DS402_MODES = [
 ]
 DS402_DEFAULT_MODE = 9   # Cyclic Sync Velocity
 
+# Allowed torque sensor scale values — must match El3002Adapter::ALLOWED_TORQUE_SCALES
+TORQUE_SCALE_OPTIONS = [20, 200, 500]   # Nm
+
 MAIN_ZERO_FIELDS = ["main_velocity", "main_position", "main_torque", "main_current"]
 DUT_ZERO_FIELDS  = ["dut_velocity",  "dut_position",  "dut_torque",  "dut_current"]
 ALL_CMD_KEYS     = [k for k, _ in COMMAND_FIELDS]
@@ -1006,6 +1009,8 @@ class DynoWindow(QMainWindow):
         self._dut_enabled    = False
         self._hold_output1   = False
         self._script_running = False
+        self._ch1_scale: int = 200   # Nm — matches El3002Adapter ch1 default
+        self._ch2_scale: int = 20    # Nm — matches El3002Adapter ch2 default
 
         self.setWindowTitle("Dyno Control")
         self._build_ui()
@@ -1046,7 +1051,7 @@ class DynoWindow(QMainWindow):
         btn_w   = QWidget()
         btn_lay = QVBoxLayout(btn_w)
         btn_lay.setSpacing(8)
-        btn_w.setFixedWidth(140)
+        btn_w.setFixedWidth(160)
 
         self._main_enable_btn = QPushButton("Main Enable")
         self._main_enable_btn.setCheckable(True)
@@ -1100,6 +1105,24 @@ class DynoWindow(QMainWindow):
         btn_lay.addSpacing(12)
         btn_lay.addWidget(self._output1_btn)
         btn_lay.addWidget(fault_btn)
+        btn_lay.addSpacing(12)
+
+        btn_lay.addWidget(QLabel("Torque Ch1 Scale:"))
+        self._ch1_scale_combo = QComboBox()
+        for v in TORQUE_SCALE_OPTIONS:
+            self._ch1_scale_combo.addItem(f"{v} Nm", v)
+        self._ch1_scale_combo.setCurrentIndex(TORQUE_SCALE_OPTIONS.index(200))
+        self._ch1_scale_combo.currentIndexChanged.connect(self._on_ch1_scale_changed)
+        btn_lay.addWidget(self._ch1_scale_combo)
+
+        btn_lay.addWidget(QLabel("Torque Ch2 Scale:"))
+        self._ch2_scale_combo = QComboBox()
+        for v in TORQUE_SCALE_OPTIONS:
+            self._ch2_scale_combo.addItem(f"{v} Nm", v)
+        self._ch2_scale_combo.setCurrentIndex(TORQUE_SCALE_OPTIONS.index(20))
+        self._ch2_scale_combo.currentIndexChanged.connect(self._on_ch2_scale_changed)
+        btn_lay.addWidget(self._ch2_scale_combo)
+
         btn_lay.addStretch()
 
         # ── Scripting panel ───────────────────────────────────────────────────
@@ -1153,6 +1176,12 @@ class DynoWindow(QMainWindow):
         self._output1_btn.setText(
             "Output 1 ON" if self._hold_output1 else "Hold Output 1")
 
+    def _on_ch1_scale_changed(self, idx: int) -> None:
+        self._ch1_scale = self._ch1_scale_combo.itemData(idx)
+
+    def _on_ch2_scale_changed(self, idx: int) -> None:
+        self._ch2_scale = self._ch2_scale_combo.itemData(idx)
+
     def _main_zero(self):
         for slot in self._slots:
             if slot.field in MAIN_ZERO_FIELDS:
@@ -1204,6 +1233,8 @@ class DynoWindow(QMainWindow):
         for slot in self._slots:
             if slot.field is not None:
                 numeric[slot.field] = slot.value
+        numeric["ch1_torque_scale"] = self._ch1_scale
+        numeric["ch2_torque_scale"] = self._ch2_scale
         self._cmd.set_command(
             numeric      = numeric,
             main_enable  = self._main_enabled,
