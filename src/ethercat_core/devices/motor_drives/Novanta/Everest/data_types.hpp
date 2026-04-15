@@ -12,8 +12,8 @@ using ds402::ModeOfOperation;
 struct Command {
     ModeOfOperation mode_of_operation      = ModeOfOperation::NO_MODE;
     float           target_torque_nm       = 0.0f;
-    float           target_velocity_rad_s  = 0.0f;
-    float           target_position_rad    = 0.0f;
+    float           target_velocity_mrevs    = 0.0f;  // 0x60FF, unit: mrev/s
+    float           target_position__enc_cnt = 0.0f;  // 0x607A, unit: raw encoder counts
     float           torque_command_2022    = 0.0f;  // 0x2022 direct torque
     float           torque_kp              = 0.0f;  // 0x2523
     float           torque_loop_max_output = 0.0f;  // 0x2527

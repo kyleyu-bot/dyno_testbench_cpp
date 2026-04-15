@@ -346,13 +346,13 @@ int main(int argc, char** argv) {
 
         Command main_cmd;
         main_cmd.mode_of_operation     = ModeOfOperation::CYCLIC_SYNC_VELOCITY;
-        main_cmd.target_velocity_rad_s = static_cast<float>(ipc_cmd.main_speed);
+        main_cmd.target_velocity_mrevs = static_cast<float>(ipc_cmd.main_speed);
         main_cmd.enable_drive          = main_enable;
         main_cmd.clear_fault           = in_reset || ipc_cmd.fault_reset;
 
         Command dut_cmd;
         dut_cmd.mode_of_operation     = ModeOfOperation::CYCLIC_SYNC_VELOCITY;
-        dut_cmd.target_velocity_rad_s = static_cast<float>(ipc_cmd.dut_speed);
+        dut_cmd.target_velocity_mrevs = static_cast<float>(ipc_cmd.dut_speed);
         dut_cmd.enable_drive          = dut_enable;
         dut_cmd.clear_fault           = in_reset || ipc_cmd.fault_reset;
 

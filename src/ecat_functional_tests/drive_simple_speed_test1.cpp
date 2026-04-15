@@ -1,11 +1,11 @@
-// Simple DS402 velocity command/readback test — targets the DUT drive.
+// Simple DS402 velocity command/readback test.
 //
 // Usage:
-//   sudo ./drive_simple_speed_test2 [options]
+//   sudo ./drive_simple_speed_test1 [options]
 //
 // Options:
-//   --topology <path>     Topology JSON file (default: config/topology.dyno2.template6.json)
-//   --slave    <name>     Configured slave name (default: dut)
+//   --topology <path>     Topology JSON file (default: config/topology.debug.json)
+//   --slave    <name>     Configured slave name (default: main_drive)
 //   --speed    <int>      Target velocity as int32 for 0x60FF (default: 1000)
 //   --mode     <int>      Mode of operation for 0x6060 (default: 9 = CSV)
 //   --duration <s>        Total test duration in seconds (default: 60)
@@ -52,7 +52,7 @@ using ModeOfOperation = ethercat_core::ds402::ModeOfOperation;
 // ── Argument defaults ─────────────────────────────────────────────────────────
 
 static constexpr const char* DEFAULT_TOPOLOGY   = "config/topology.dyno2.template6.json";
-static constexpr const char* DEFAULT_SLAVE      = "dut";
+static constexpr const char* DEFAULT_SLAVE      = "main_drive";
 static constexpr int         DEFAULT_SPEED       = 1000;
 static constexpr int         DEFAULT_MODE        = 9;   // CYCLIC_SYNC_VELOCITY
 static constexpr double      DEFAULT_DURATION_S  = 60.0;
@@ -191,6 +191,7 @@ static void applyStartupParams(
     const std::unordered_map<std::string, float>& params,
     int soem_idx)
 {
+    // Index map matching NovantaEverestAdapter::startupReadSpecs().
     static const struct { const char* key; uint16_t index; } kMap[] = {
         {"torque_loop_max_output", 0x2527},
         {"torque_loop_min_output", 0x2528},
@@ -216,12 +217,13 @@ static const char* alStateName(uint8_t code) {
     const bool    error = (code & 0x10u) != 0;
     const char*   name;
     switch (base) {
-    case 0x01: name = "INIT";      break;
-    case 0x02: name = "PRE_OP";    break;
-    case 0x03: name = "BOOTSTRAP"; break;
-    case 0x04: name = "SAFE_OP";   break;
-    case 0x08: name = "OP";        break;
-    default:   name = "UNKNOWN";   break;
+    case 0x01: name = "INIT";             break;
+    case 0x02: name = "PRE_OP";          break;
+    case 0x03: name = "BOOTSTRAP";       break;
+    case 0x04: name = "SAFE_OP";         break;
+    case 0x08: name = "OP";              break;
+    case 0x00: name = "UNKNOWN";         break;
+    default:   name = "UNKNOWN";         break;
     }
     return error ? "ERROR" : name;
 }
@@ -247,6 +249,7 @@ static const char* cia402Name(Cia402State s) {
 int main(int argc, char** argv) {
     const Args args = parseArgs(argc, argv);
 
+    // Validate mode value.
     const auto cmd_mode = static_cast<ModeOfOperation>(args.mode);
     switch (cmd_mode) {
     case ModeOfOperation::NO_MODE:
@@ -280,6 +283,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Verify the requested slave exists.
     if (rt->adapters.find(args.slave) == rt->adapters.end()) {
         std::fprintf(stderr, "Unknown slave '%s'. Available:", args.slave.c_str());
         for (auto& [k, _] : rt->adapters) std::fprintf(stderr, " %s", k.c_str());
@@ -290,6 +294,7 @@ int main(int argc, char** argv) {
 
     const int soem_idx = rt->slave_index.at(args.slave);
 
+    // Extract startup params (all as float).
     float torque_kp = 0.0f, vel_qr = 0.0f, vel_is = 0.0f;
     float vel_kp = 0.0f, vel_ki = 0.0f, vel_kd = 0.0f;
     float pos_kp = 0.0f, pos_ki = 0.0f, pos_kd = 0.0f;
@@ -330,6 +335,7 @@ int main(int argc, char** argv) {
 
     std::printf("Using '%s' at position %d\n", args.slave.c_str(), soem_idx - 1);
 
+    // Build RT config.
     LoopRtConfig rt_cfg;
     rt_cfg.rt_priority = std::clamp(args.rt_priority, 0, 99);
     if (args.cpu_affinity >= 0) rt_cfg.cpu_affinity.insert(args.cpu_affinity);
@@ -348,12 +354,12 @@ int main(int argc, char** argv) {
     const int32_t speed_cmd = args.speed;
 
     while (!g_shutdown.load() && std::chrono::steady_clock::now() < deadline) {
-        const auto now      = std::chrono::steady_clock::now();
+        const auto now     = std::chrono::steady_clock::now();
         const bool in_reset = now < reset_end;
 
         Command cmd;
         cmd.mode_of_operation      = cmd_mode;
-        cmd.target_velocity_rad_s  = static_cast<float>(speed_cmd);
+        cmd.target_velocity_mrevs  = static_cast<float>(speed_cmd);
         cmd.torque_kp              = torque_kp;
         cmd.torque_loop_max_output = vel_qr;
         cmd.torque_loop_min_output = vel_is;

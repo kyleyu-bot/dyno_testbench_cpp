@@ -73,9 +73,8 @@ MasterConfig loadTopology(const std::string& path) {
 
         if (entry.contains("scaling")) {
             auto& s = entry["scaling"];
-            sc.scaling.torque_lsb_per_nm      = s.value("torque_lsb_per_nm",      10.0f);
-            sc.scaling.velocity_lsb_per_rad_s = s.value("velocity_lsb_per_rad_s", 1000.0f);
-            sc.scaling.position_lsb_per_rad   = s.value("position_lsb_per_rad",   10000.0f);
+            sc.scaling.output_encoder_res_bits = s.value("output_encoder_res_bits", 20);
+            sc.scaling.input_encoder_res_bits  = s.value("input_encoder_res_bits",  20);
         }
 
         cfg.slaves.push_back(std::move(sc));
@@ -89,20 +88,10 @@ static std::unique_ptr<ISlaveAdapter> buildAdapter(const SlaveConfig& cfg) {
     SlaveIdentity id{cfg.name, cfg.position, cfg.vendor_id, cfg.product_code};
 
     if (cfg.kind == "everest") {
-        novanta::everest::PdoScaling sc{
-            cfg.scaling.torque_lsb_per_nm,
-            cfg.scaling.velocity_lsb_per_rad_s,
-            cfg.scaling.position_lsb_per_rad,
-        };
-        return std::make_unique<novanta::everest::NovantaEverestAdapter>(id, sc);
+        return std::make_unique<novanta::everest::NovantaEverestAdapter>(id);
     }
     if (cfg.kind == "volcano") {
-        novanta::volcano::PdoScaling sc{
-            cfg.scaling.torque_lsb_per_nm,
-            cfg.scaling.velocity_lsb_per_rad_s,
-            cfg.scaling.position_lsb_per_rad,
-        };
-        return std::make_unique<novanta::volcano::NovantaVolcanoAdapter>(id, sc);
+        return std::make_unique<novanta::volcano::NovantaVolcanoAdapter>(id);
     }
     if (cfg.kind == "EL2004") {
         return std::make_unique<beckhoff::el2004::El2004Adapter>(id);

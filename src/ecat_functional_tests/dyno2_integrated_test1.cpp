@@ -383,7 +383,7 @@ int main(int argc, char** argv) {
         // ── Drive command ────────────────────────────────────────────────────
         Command drive_cmd;
         drive_cmd.mode_of_operation      = cmd_mode;
-        drive_cmd.target_velocity_rad_s  = static_cast<float>(args.speed);
+        drive_cmd.target_velocity_mrevs  = static_cast<float>(args.speed);
         drive_cmd.torque_kp              = torque_kp;
         drive_cmd.torque_loop_max_output = vel_qr;
         drive_cmd.torque_loop_min_output = vel_is;

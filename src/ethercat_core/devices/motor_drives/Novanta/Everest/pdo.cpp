@@ -21,8 +21,8 @@ std::vector<uint8_t> packCommand(
     RxPdo pdo{};
     pdo.controlword            = cw;
     pdo.mode_of_operation      = static_cast<int8_t>(cmd.mode_of_operation);
-    pdo.target_position        = clampI32(static_cast<int64_t>(cmd.target_position_rad));
-    pdo.target_velocity        = clampI32(static_cast<int64_t>(cmd.target_velocity_rad_s));
+    pdo.target_position        = clampI32(static_cast<int64_t>(cmd.target_position__enc_cnt));
+    pdo.target_velocity        = clampI32(static_cast<int64_t>(cmd.target_velocity_mrevs));
     pdo.torque_command_2022    = (cmd.torque_command_2022 != 0.0f)
                                       ? cmd.torque_command_2022
                                       : cmd.target_torque_nm;

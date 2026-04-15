@@ -152,6 +152,10 @@ void EthercatLoop::stop(double /*timeout_s*/) {
     }
 }
 
+void EthercatLoop::setCycleCallback(CycleCallback cb) {
+    cycle_callback_ = std::move(cb);
+}
+
 void EthercatLoop::setCommand(const SystemCommand& cmd) {
     std::lock_guard<std::mutex> lk(mutex_);
     // Preserve the accumulated sequence number.
@@ -210,12 +214,18 @@ void EthercatLoop::runForever() {
         const int64_t period_ns     = (prev_start_ns == 0) ? 0 : (start_ns - prev_start_ns);
         const int64_t wakeup_latency = start_ns - next_tick;
 
-        runOnce();
+        const SystemStatus cycle_status = runOnce();
 
+        LoopStats cycle_stats;
         {
             std::lock_guard<std::mutex> lk(mutex_);
             stats_.last_period_ns          = period_ns;
             stats_.last_wakeup_latency_ns  = wakeup_latency;
+            cycle_stats = stats_;
+        }
+
+        if (cycle_callback_) {
+            cycle_callback_(cycle_status, cycle_stats);
         }
 
         prev_start_ns = start_ns;

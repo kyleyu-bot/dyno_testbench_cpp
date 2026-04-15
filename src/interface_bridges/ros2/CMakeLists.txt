@@ -9,6 +9,17 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp      REQUIRED)
 find_package(std_msgs    REQUIRED)
 
+# ── quill — low-latency async logging ─────────────────────────────────────────
+include(FetchContent)
+FetchContent_Declare(
+    quill
+    GIT_REPOSITORY https://github.com/odygrd/quill.git
+    GIT_TAG        v7.5.0
+    GIT_SHALLOW    ON
+)
+set(QUILL_NO_EXCEPTIONS ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(quill)
+
 # ── ethercat_core ─────────────────────────────────────────────────────────────
 # Point at the parent repo's built artifacts.
 # Build the parent CMake project first, then colcon build this package.
@@ -47,6 +58,7 @@ ament_target_dependencies(bridge_ros2
 target_link_libraries(bridge_ros2
     ${ETHERCAT_CORE_LIB}
     ${SOEM_LIB}
+    quill::quill
     pthread
     rt
 )
