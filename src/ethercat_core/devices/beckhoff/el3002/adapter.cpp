@@ -82,14 +82,21 @@ float El3002Adapter::scaleAdcToVoltage(int32_t sample) {
 }
 
 float El3002Adapter::scaledTorqueCh1(const Data& d) const {
-    return scaleAdc(d.pai_samples_1) * ch1_torque_scale_;
+    return (scaleAdc(d.pai_samples_1) - ch1_offset_raw_) * ch1_torque_scale_;
 }
 float El3002Adapter::scaledTorqueCh2(const Data& d) const {
-    return scaleAdc(d.pai_samples_2) * ch2_torque_scale_;
+    return (scaleAdc(d.pai_samples_2) - ch2_offset_raw_) * ch2_torque_scale_;
 }
 
 void El3002Adapter::setCh1TorqueScale(float s) { ch1_torque_scale_ = validateTorqueScale(s); }
 void El3002Adapter::setCh2TorqueScale(float s) { ch2_torque_scale_ = validateTorqueScale(s); }
+
+void El3002Adapter::zeroTorqueCh1(const Data& d) {
+    ch1_offset_raw_ = scaleAdc(d.pai_samples_1);
+}
+void El3002Adapter::zeroTorqueCh2(const Data& d) {
+    ch2_offset_raw_ = scaleAdc(d.pai_samples_2);
+}
 
 float El3002Adapter::validateTorqueScale(float s) {
     for (float allowed : ALLOWED_TORQUE_SCALES) {

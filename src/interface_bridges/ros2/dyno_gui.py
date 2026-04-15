@@ -294,10 +294,12 @@ class DynoCommander(Node):
         # payload when a slider is explicitly assigned to them, so the bridge
         # keeps its SDO-seeded values by default.
         self._numeric      = {k: 0 for k in ALL_CMD_KEYS if k not in GAIN_FIELDS}
-        self._main_enable  = False
-        self._dut_enable   = False
-        self._fault_reset  = False
-        self._hold_output1 = False
+        self._main_enable       = False
+        self._dut_enable        = False
+        self._fault_reset       = False
+        self._hold_output1      = False
+        self._zero_torque_ch1   = False
+        self._zero_torque_ch2   = False
         self._main_mode    = DS402_DEFAULT_MODE
         self._dut_mode     = DS402_DEFAULT_MODE
 
@@ -413,16 +415,30 @@ class DynoCommander(Node):
         with self._lock:
             self._fault_reset = True
 
+    def pulse_torque_zero_ch1(self):
+        """Send zero_torque_ch1=true for one publish cycle."""
+        with self._lock:
+            self._zero_torque_ch1 = True
+
+    def pulse_torque_zero_ch2(self):
+        """Send zero_torque_ch2=true for one publish cycle."""
+        with self._lock:
+            self._zero_torque_ch2 = True
+
     def _publish(self):
         with self._lock:
             payload = dict(self._numeric)
-            payload["main_enable"]  = self._main_enable
-            payload["dut_enable"]   = self._dut_enable
-            payload["fault_reset"]  = self._fault_reset
-            payload["hold_output1"] = self._hold_output1
-            payload["main_mode"]    = self._main_mode
-            payload["dut_mode"]     = self._dut_mode
-            self._fault_reset = False   # one-shot pulse
+            payload["main_enable"]       = self._main_enable
+            payload["dut_enable"]        = self._dut_enable
+            payload["fault_reset"]       = self._fault_reset
+            payload["hold_output1"]      = self._hold_output1
+            payload["main_mode"]         = self._main_mode
+            payload["dut_mode"]          = self._dut_mode
+            payload["zero_torque_ch1"]   = self._zero_torque_ch1
+            payload["zero_torque_ch2"]   = self._zero_torque_ch2
+            self._fault_reset          = False   # one-shot pulses
+            self._zero_torque_ch1      = False
+            self._zero_torque_ch2      = False
 
         msg      = StringMsg()
         msg.data = json.dumps(payload)
@@ -1115,6 +1131,11 @@ class DynoWindow(QMainWindow):
         self._ch1_scale_combo.currentIndexChanged.connect(self._on_ch1_scale_changed)
         btn_lay.addWidget(self._ch1_scale_combo)
 
+        zero_ch1_btn = QPushButton("Zero Ch1")
+        zero_ch1_btn.setToolTip("Capture current Ch1 reading as zero offset")
+        zero_ch1_btn.clicked.connect(self._cmd.pulse_torque_zero_ch1)
+        btn_lay.addWidget(zero_ch1_btn)
+
         btn_lay.addWidget(QLabel("Torque Ch2 Scale:"))
         self._ch2_scale_combo = QComboBox()
         for v in TORQUE_SCALE_OPTIONS:
@@ -1122,6 +1143,11 @@ class DynoWindow(QMainWindow):
         self._ch2_scale_combo.setCurrentIndex(TORQUE_SCALE_OPTIONS.index(20))
         self._ch2_scale_combo.currentIndexChanged.connect(self._on_ch2_scale_changed)
         btn_lay.addWidget(self._ch2_scale_combo)
+
+        zero_ch2_btn = QPushButton("Zero Ch2")
+        zero_ch2_btn.setToolTip("Capture current Ch2 reading as zero offset")
+        zero_ch2_btn.clicked.connect(self._cmd.pulse_torque_zero_ch2)
+        btn_lay.addWidget(zero_ch2_btn)
 
         btn_lay.addStretch()
 

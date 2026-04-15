@@ -144,6 +144,9 @@ struct CommandState {
     // command messages leave the scale unchanged.
     float    ch1_torque_scale     = 200.0f;  // matches El3002Adapter ch1 default
     float    ch2_torque_scale     = 20.0f;   // matches El3002Adapter ch2 default
+    // One-shot zero flags — cleared by the bridge after applying.
+    bool     zero_torque_ch1      = false;
+    bool     zero_torque_ch2      = false;
 };
 
 static std::mutex      g_cmd_mutex;
@@ -220,6 +223,9 @@ public:
                     g_cmd_state.dut_pos_kd          = j.value("dut_pos_kd",           g_cmd_state.dut_pos_kd);
                     g_cmd_state.ch1_torque_scale    = j.value("ch1_torque_scale",     g_cmd_state.ch1_torque_scale);
                     g_cmd_state.ch2_torque_scale    = j.value("ch2_torque_scale",     g_cmd_state.ch2_torque_scale);
+                    // One-shot: OR with current so a true is never lost between snapshots.
+                    g_cmd_state.zero_torque_ch1    |= j.value("zero_torque_ch1", false);
+                    g_cmd_state.zero_torque_ch2    |= j.value("zero_torque_ch2", false);
                 } catch (...) {
                     RCLCPP_WARN(get_logger(), "Failed to parse /dyno/command JSON");
                 }
@@ -892,6 +898,17 @@ int main(int argc, char** argv) {
             auto torque_it = status.by_slave.find(torque_slave);
             if (torque_it != status.by_slave.end() && torque_it->second.has_value()) {
                 const auto& d = std::any_cast<const beckhoff::el3002::Data&>(torque_it->second);
+                // Apply one-shot zero before reading, then clear flags in shared state.
+                if (cmd.zero_torque_ch1) {
+                    el3002->zeroTorqueCh1(d);
+                    std::lock_guard<std::mutex> lk(g_cmd_mutex);
+                    g_cmd_state.zero_torque_ch1 = false;
+                }
+                if (cmd.zero_torque_ch2) {
+                    el3002->zeroTorqueCh2(d);
+                    std::lock_guard<std::mutex> lk(g_cmd_mutex);
+                    g_cmd_state.zero_torque_ch2 = false;
+                }
                 ch1_t = static_cast<double>(el3002->scaledTorqueCh1(d));
                 ch2_t = static_cast<double>(el3002->scaledTorqueCh2(d));
             }
@@ -912,7 +929,7 @@ int main(int argc, char** argv) {
                     std::printf(
                         "[main] cycle=%lu wkc=%d "
                         "al=%s state=%s "
-                        "cmd_60FF=%d speed_606C=%d "
+                        "cmd_60FF=%.3f speed_606C=%d "
                         "mode_6061=%d sw=0x%04X err=0x%04X "
                         "bus_v=%.2f "
                         "vel_kp=%.4f vel_ki=%.4f torque_kp=%.4f\n",
@@ -920,7 +937,7 @@ int main(int argc, char** argv) {
                         stats.last_wkc,
                         alStateName(static_cast<int>(ec_slave[drive_soem_idx].state)).c_str(),
                         cia402Name(ds.cia402_state),
-                        cmd.main_speed,
+                        static_cast<double>(cmd.main_speed),
                         ds.measured_input_side_velocity_raw,
                         static_cast<int>(ds.mode_of_operation_display),
                         static_cast<unsigned>(ds.status_word),
@@ -938,7 +955,7 @@ int main(int argc, char** argv) {
                     std::printf(
                         "[ dut] cycle=%lu wkc=%d "
                         "al=%s state=%s "
-                        "cmd_60FF=%d speed_606C=%d "
+                        "cmd_60FF=%.3f speed_606C=%d "
                         "mode_6061=%d sw=0x%04X err=0x%04X "
                         "bus_v=%.2f "
                         "vel_kp=%.4f vel_ki=%.4f torque_kp=%.4f\n",
@@ -946,7 +963,7 @@ int main(int argc, char** argv) {
                         stats.last_wkc,
                         alStateName(dut_present ? static_cast<int>(ec_slave[dut_soem_idx].state) : 0).c_str(),
                         cia402Name(ds.cia402_state),
-                        cmd.dut_speed,
+                        static_cast<double>(cmd.dut_speed),
                         ds.measured_input_side_velocity_raw,
                         static_cast<int>(ds.mode_of_operation_display),
                         static_cast<unsigned>(ds.status_word),
