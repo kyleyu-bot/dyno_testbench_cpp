@@ -6,6 +6,19 @@ Protocol:
     run()   — called in a background thread when "Run Test" is pressed.
               Check stop_event.is_set() regularly to support Abort.
               commander.set_command() sends to the drive.
+
+Framework contract (as of preamble/epilogue feature):
+    Before run() is called the framework has already:
+      - zeroed all setpoint commands and disabled drives
+      - enabled both drives (main_enable=True, dut_enable=True)
+      - set the mode of operation to the value selected in the GUI mode combos
+
+    After run() returns (whether completed or aborted) the framework will:
+      - zero all setpoint commands (keep drives enabled briefly)
+      - disable both drives and set mode=0 (No Mode)
+
+    Scripts may still call set_command(enable=..., main_mode=...) explicitly —
+    these are idempotent with the framework's preamble/epilogue state.
 """
 
 import json
@@ -54,7 +67,7 @@ def run(params: dict, commander, stop_event):
         _send(target * (steps - i) / steps)
         time.sleep(dt)
 
-    # Zero and disable
+    # Zero and disable — kept for clarity; the framework epilogue does this anyway.
     commander.set_command(
         numeric     = {"main_velocity": 0},
         main_enable = False,

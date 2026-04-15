@@ -128,6 +128,21 @@ MAIN_ZERO_FIELDS = ["main_velocity", "main_position", "main_torque", "main_curre
 DUT_ZERO_FIELDS  = ["dut_velocity",  "dut_position",  "dut_torque",  "dut_current"]
 ALL_CMD_KEYS     = [k for k, _ in COMMAND_FIELDS]
 
+# Non-gain setpoint fields zeroed during script preamble/epilogue
+_ZERO_CMD = {k: 0 for k in ALL_CMD_KEYS if k not in GAIN_FIELDS}
+
+
+def _interruptible_sleep(secs: float, stop_event, granularity: float = 0.01) -> bool:
+    """Sleep for ``secs`` seconds, waking every ``granularity`` seconds to check
+    stop_event.  Returns True if interrupted (stop_event set), False if the full
+    duration elapsed."""
+    deadline = time.monotonic() + secs
+    while time.monotonic() < deadline:
+        if stop_event.is_set():
+            return True
+        time.sleep(min(granularity, deadline - time.monotonic()))
+    return False
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test script discovery and execution
@@ -171,11 +186,22 @@ class ScriptRunner:
         with self._lock:
             return self._thread is not None and self._thread.is_alive()
 
-    def run(self, path: str, params: dict, commander, on_done, on_log):
+    def run(self, path: str, params: dict, commander, on_done, on_log,
+            main_mode: int = 9, dut_mode: int = 9,
+            pre_settle_s: float = 0.1, post_settle_s: float = 0.1):
         """
-        Start script in a background thread.
-        on_done(success: bool, msg: str) — called on completion (Qt-thread via QTimer)
-        on_log(line: str)                — called for each stdout line
+        Start script in a background thread with preamble and epilogue.
+
+        Preamble (runs before mod.run()):
+          zero+disable → sleep(pre_settle_s) → enable → sleep(pre_settle_s)
+          → set mode → sleep(pre_settle_s) → mod.run()
+
+        Epilogue (runs after mod.run() regardless of success/abort):
+          zero+keep_enabled → sleep(post_settle_s) → disable+mode=0
+          → sleep(post_settle_s) → on_done()
+
+        on_done(success: bool, msg: str) — called once, after epilogue completes
+        on_log(line: str)                — called for preamble/epilogue status lines
         """
         if self.is_running:
             return
@@ -183,11 +209,63 @@ class ScriptRunner:
         mod = _load_script_module(path)
 
         def _target():
+            zero = _ZERO_CMD.copy()
+
+            # ── PREAMBLE ─────────────────────────────────────────────────────
+            # Step 0: caller already sent zero+disable; wait for it to reach drive.
+            on_log("[preamble] waiting for zeros to propagate…")
+            if _interruptible_sleep(pre_settle_s, self._stop_event):
+                on_done(False, "Aborted during pre-zero settle.")
+                return
+
+            # Step 1: enable both drives, mode still 0
+            on_log("[preamble] enabling drives…")
+            commander.set_command(
+                numeric=zero, main_enable=True, dut_enable=True,
+                main_mode=0, dut_mode=0)
+            if _interruptible_sleep(pre_settle_s, self._stop_event):
+                commander.set_command(
+                    numeric=zero, main_enable=False, dut_enable=False,
+                    main_mode=0, dut_mode=0)
+                on_done(False, "Aborted during pre-enable settle.")
+                return
+
+            # Step 2: set target mode
+            on_log(f"[preamble] setting mode (main={main_mode}, dut={dut_mode})…")
+            commander.set_command(
+                numeric=zero, main_enable=True, dut_enable=True,
+                main_mode=main_mode, dut_mode=dut_mode)
+            if _interruptible_sleep(pre_settle_s, self._stop_event):
+                commander.set_command(
+                    numeric=zero, main_enable=False, dut_enable=False,
+                    main_mode=0, dut_mode=0)
+                on_done(False, "Aborted during pre-mode settle.")
+                return
+
+            # ── SCRIPT ───────────────────────────────────────────────────────
+            on_log("[preamble] starting script…")
             try:
                 mod.run(params, commander, self._stop_event)
-                on_done(True, "Completed successfully.")
+                success, msg = True, "Completed successfully."
             except Exception:
-                on_done(False, traceback.format_exc())
+                success, msg = False, traceback.format_exc()
+
+            # ── EPILOGUE ─────────────────────────────────────────────────────
+            # Zero setpoints; keep drives briefly enabled so motion can settle.
+            on_log("[epilogue] zeroing commands…")
+            commander.set_command(
+                numeric=zero, main_enable=True, dut_enable=True,
+                main_mode=0, dut_mode=0)
+            time.sleep(post_settle_s)   # unconditional — always clean up
+
+            # Disable drives and clear mode.
+            on_log("[epilogue] disabling drives…")
+            commander.set_command(
+                numeric=zero, main_enable=False, dut_enable=False,
+                main_mode=0, dut_mode=0)
+            time.sleep(post_settle_s)
+
+            on_done(success, msg)
 
         self._thread = threading.Thread(target=_target, daemon=True)
         self._thread.start()
@@ -665,7 +743,7 @@ class ScriptingPanel(QGroupBox):
     """
 
     def __init__(self, commander, scripts_dir: str,
-                 on_script_active=None, parent=None):
+                 on_script_active=None, get_modes=None, parent=None):
         super().__init__("Test Scripts", parent)
         self._commander        = commander
         self._scripts_dir      = scripts_dir
@@ -673,6 +751,7 @@ class ScriptingPanel(QGroupBox):
         self._param_widgets: dict[str, QDoubleSpinBox | QSpinBox] = {}
         self._current_mod      = None
         self._on_script_active = on_script_active  # callable(bool) | None
+        self._get_modes        = get_modes          # callable() → (main_mode, dut_mode) | None
 
         # ── Script selector ───────────────────────────────────────────────────
         self._script_combo = QComboBox()
@@ -700,6 +779,32 @@ class ScriptingPanel(QGroupBox):
         self._params_scroll.setMinimumHeight(80)
         self._params_scroll.setMaximumHeight(200)
 
+        # ── Timing ────────────────────────────────────────────────────────────
+        self._pre_settle_spin = QDoubleSpinBox()
+        self._pre_settle_spin.setRange(0, 5000)
+        self._pre_settle_spin.setSingleStep(10)
+        self._pre_settle_spin.setSuffix(" ms")
+        self._pre_settle_spin.setValue(100)
+        self._pre_settle_spin.setToolTip(
+            "Wait applied after each preamble step:\n"
+            "  zero→enable, enable→mode, mode→script start")
+
+        self._post_settle_spin = QDoubleSpinBox()
+        self._post_settle_spin.setRange(0, 5000)
+        self._post_settle_spin.setSingleStep(10)
+        self._post_settle_spin.setSuffix(" ms")
+        self._post_settle_spin.setValue(100)
+        self._post_settle_spin.setToolTip(
+            "Wait applied after each epilogue step:\n"
+            "  zero setpoints, then disable drives")
+
+        timing_row = QHBoxLayout()
+        timing_row.addWidget(QLabel("Pre:"))
+        timing_row.addWidget(self._pre_settle_spin)
+        timing_row.addSpacing(6)
+        timing_row.addWidget(QLabel("Post:"))
+        timing_row.addWidget(self._post_settle_spin)
+
         # ── Buttons ───────────────────────────────────────────────────────────
         self._run_btn = QPushButton("Run Test")
         self._run_btn.setStyleSheet("background-color: #44cc44; font-weight: bold;")
@@ -726,6 +831,7 @@ class ScriptingPanel(QGroupBox):
         lay.addLayout(selector_row)
         lay.addWidget(QLabel("Parameters:"))
         lay.addWidget(self._params_scroll)
+        lay.addLayout(timing_row)
         lay.addLayout(btn_row)
         lay.addWidget(QLabel("Output:"))
         lay.addWidget(self._log, 1)
@@ -816,16 +922,24 @@ class ScriptingPanel(QGroupBox):
         self._run_btn.setEnabled(False)
         self._abort_btn.setEnabled(True)
 
+        main_mode, dut_mode = self._get_modes() if self._get_modes else (9, 9)
+        pre_s  = self._pre_settle_spin.value()  / 1000.0
+        post_s = self._post_settle_spin.value() / 1000.0
+
         def _on_done(success: bool, msg: str):
             QTimer.singleShot(0, lambda: self._on_script_done(success, msg))
 
         try:
             self._runner.run(
-                path      = self._script_combo.currentData(),
-                params    = params,
-                commander = self._commander,
-                on_done   = _on_done,
-                on_log    = self._log_line,
+                path          = self._script_combo.currentData(),
+                params        = params,
+                commander     = self._commander,
+                on_done       = _on_done,
+                on_log        = self._log_line,
+                main_mode     = main_mode,
+                dut_mode      = dut_mode,
+                pre_settle_s  = pre_s,
+                post_settle_s = post_s,
             )
         except Exception as exc:
             if self._on_script_active:
@@ -991,7 +1105,11 @@ class DynoWindow(QMainWindow):
         # ── Scripting panel ───────────────────────────────────────────────────
         self._script_panel = ScriptingPanel(
             self._cmd, self._scripts_dir,
-            on_script_active=self._on_script_active,
+            on_script_active = self._on_script_active,
+            get_modes        = lambda: (
+                DS402_MODES[self._main_mode_combo.currentIndex()][1],
+                DS402_MODES[self._dut_mode_combo.currentIndex()][1],
+            ),
         )
         self._script_panel.setMinimumWidth(280)
 
@@ -1050,6 +1168,13 @@ class DynoWindow(QMainWindow):
     def _on_script_active(self, active: bool) -> None:
         """Called by ScriptingPanel when a script starts (True) or finishes (False)."""
         self._script_running = active
+        # Always reset mode combos to "No Mode (0)":
+        #   • on start  — ensures _get_modes() returns (0,0) so the preamble doesn't
+        #                 briefly re-apply whatever manual mode the GUI combo showed.
+        #   • on finish — reflects the epilogue's mode=0 disable state.
+        _none_idx = next(i for i, (_, v) in enumerate(DS402_MODES) if v == 0)
+        self._main_mode_combo.setCurrentIndex(_none_idx)
+        self._dut_mode_combo.setCurrentIndex(_none_idx)
         if not active:
             # Uncheck both enable buttons so the drive is not automatically
             # re-enabled when GUI push resumes after the script.

@@ -52,7 +52,11 @@ except ImportError:
 
 MIME_TYPE   = "application/x-dyno-log-signal"
 X_FIELD     = "stamp_ns"          # always the x-axis; converted to seconds
-DEFAULT_DIR = "test_data_log"
+
+# Resolve default log dir relative to repo root (two levels up from src/tools/)
+# so the tool works regardless of which directory it is launched from.
+_REPO_ROOT  = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT_DIR = os.path.join(_REPO_ROOT, "test_data_log")
 
 CURVE_COLORS = [
     "#e74c3c", "#3498db", "#2ecc71", "#f39c12",
