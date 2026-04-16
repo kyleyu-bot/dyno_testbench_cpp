@@ -494,12 +494,13 @@ class DynoLogViewer(QMainWindow):
         prev = self._file_combo.currentText()
         self._file_combo.clear()
         if os.path.isdir(self._log_dir):
-            files = sorted(
-                [f for f in os.listdir(self._log_dir) if f.endswith(".csv")],
-                reverse=True,   # newest first
-            )
-            for f in files:
-                self._file_combo.addItem(f, userData=os.path.join(self._log_dir, f))
+            for root, dirs, files in os.walk(self._log_dir):
+                dirs.sort(reverse=True)          # newest subdirs first (date, then HHMMSS)
+                for fname in sorted(files, reverse=True):
+                    if fname.endswith(".csv"):
+                        full = os.path.join(root, fname)
+                        rel  = os.path.relpath(full, self._log_dir)
+                        self._file_combo.addItem(rel, userData=full)
         self._file_combo.blockSignals(False)
         # Restore previous selection if still present, else auto-load first.
         idx = self._file_combo.findText(prev)

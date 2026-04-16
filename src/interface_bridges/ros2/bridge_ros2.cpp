@@ -70,9 +70,9 @@ extern "C" {
 #include <chrono>
 #include <csignal>
 #include <ctime>
+#include <filesystem>
 #include <signal.h>
 #include <cstring>
-#include <sys/stat.h>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -535,26 +535,27 @@ int main(int argc, char** argv) {
     EthercatLoop loop(*rt, cfg.cycle_hz, rt_cfg);
 
     // ── Quill logging setup ───────────────────────────────────────────────────
-    // Ensure test_data_log/ directory exists next to the binary's cwd.
-    static constexpr const char* LOG_DIR = "test_data_log";
-    {
-        struct stat st{};
-        if (stat(LOG_DIR, &st) != 0) {
-            if (mkdir(LOG_DIR, 0755) != 0) {
-                RCLCPP_WARN(node->get_logger(),
-                    "Could not create log directory '%s' (errno=%d) — logging to cwd.", LOG_DIR, errno);
-            }
-        }
-    }
-
-    // Build a timestamped log filename: test_data_log/dyno_pdo_YYYYMMDD_HHMMSS.csv
+    // Create test_data_log/YYYY-MM-DD/HHMMSS/ for this run.
     std::string log_path;
     {
         std::time_t t   = std::time(nullptr);
         std::tm*    tm_ = std::localtime(&t);
-        char        buf[64];
-        std::strftime(buf, sizeof(buf), "test_data_log/dyno_pdo_%Y%m%d_%H%M%S.csv", tm_);
-        log_path = buf;
+
+        char date_buf[16], time_buf[8];
+        std::strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", tm_);
+        std::strftime(time_buf, sizeof(time_buf), "%H%M%S",   tm_);
+
+        std::string run_dir = std::string("test_data_log/") + date_buf + "/" + time_buf;
+
+        std::error_code ec;
+        std::filesystem::create_directories(run_dir, ec);
+        if (ec) {
+            RCLCPP_WARN(node->get_logger(),
+                "Could not create log directory '%s' (%s) — logging to cwd.",
+                run_dir.c_str(), ec.message().c_str());
+        }
+
+        log_path = run_dir + "/dyno_pdo.csv";
     }
 
     quill::Backend::start();
