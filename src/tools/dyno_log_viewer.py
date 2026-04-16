@@ -27,7 +27,7 @@ try:
     from PyQt5.QtWidgets import (
         QApplication, QMainWindow, QWidget,
         QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
-        QLabel, QComboBox, QPushButton, QSpinBox,
+        QLabel, QComboBox, QPushButton, QSpinBox, QLineEdit,
         QListWidget, QListWidgetItem, QGroupBox,
         QMenu, QAction, QFileDialog, QSizePolicy, QMessageBox,
         QFrame, QScrollArea,
@@ -369,7 +369,25 @@ class DynoLogViewer(QMainWindow):
     # ── UI construction ────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # ── Top toolbar ───────────────────────────────────────────────────────
+        # ── Directory row ─────────────────────────────────────────────────────
+        dir_row  = QWidget()
+        dlay     = QHBoxLayout(dir_row)
+        dlay.setContentsMargins(6, 2, 6, 2)
+        dlay.setSpacing(8)
+
+        dlay.addWidget(QLabel("Log dir:"))
+        self._dir_edit = QLineEdit(self._log_dir)
+        self._dir_edit.setMinimumWidth(420)
+        self._dir_edit.returnPressed.connect(self._on_dir_changed)
+        dlay.addWidget(self._dir_edit)
+
+        browse_btn = QPushButton("Browse...")
+        browse_btn.setFixedWidth(80)
+        browse_btn.clicked.connect(self._on_browse_dir)
+        dlay.addWidget(browse_btn)
+        dlay.addStretch()
+
+        # ── File / controls toolbar ───────────────────────────────────────────
         toolbar = QWidget()
         tlay    = QHBoxLayout(toolbar)
         tlay.setContentsMargins(6, 4, 6, 4)
@@ -463,7 +481,8 @@ class DynoLogViewer(QMainWindow):
         central = QWidget()
         vlay    = QVBoxLayout(central)
         vlay.setContentsMargins(4, 4, 4, 4)
-        vlay.setSpacing(4)
+        vlay.setSpacing(0)
+        vlay.addWidget(dir_row)
         vlay.addWidget(toolbar)
         vlay.addWidget(splitter, 1)
         self.setCentralWidget(central)
@@ -510,6 +529,28 @@ class DynoLogViewer(QMainWindow):
         self._status.setText(
             f"{os.path.basename(path)}  |  {rows:,} rows  |  {dur:.1f} s  |  {len(df.columns)} signals"
         )
+
+    # ── Directory selection ────────────────────────────────────────────────────
+
+    def _on_dir_changed(self):
+        """Called when the user presses Enter in the directory line-edit."""
+        path = self._dir_edit.text().strip()
+        if os.path.isdir(path):
+            self._log_dir = os.path.abspath(path)
+            self._dir_edit.setText(self._log_dir)
+            self._refresh_file_list()
+        else:
+            # Revert to last valid directory.
+            self._dir_edit.setText(self._log_dir)
+
+    def _on_browse_dir(self):
+        """Open a directory picker and redirect the log source."""
+        path = QFileDialog.getExistingDirectory(
+            self, "Select Log Directory", self._log_dir)
+        if path:
+            self._log_dir = path
+            self._dir_edit.setText(path)
+            self._refresh_file_list()
 
     # ── Display count ──────────────────────────────────────────────────────────
 
