@@ -30,6 +30,7 @@ try:
         QLabel, QComboBox, QPushButton, QSpinBox,
         QListWidget, QListWidgetItem, QGroupBox,
         QMenu, QAction, QFileDialog, QSizePolicy, QMessageBox,
+        QFrame, QScrollArea,
     )
 except ImportError:
     print("ERROR: PyQt5 not found.  pip install PyQt5", file=sys.stderr)
@@ -212,6 +213,146 @@ class PlotGrid(QWidget):
         return [cell for row in self._cells for cell in row]
 
 
+# ── Display box (drop target, shows scalar summary) ───────────────────────────
+
+class DisplayBox(QFrame):
+    """Drop-target cell showing a signal's last / min / max value from the loaded CSV."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._field: "str | None"          = None
+        self._df:    "pd.DataFrame | None" = None
+
+        self.setAcceptDrops(True)
+        self.setFrameShape(QFrame.Box)
+        self.setLineWidth(1)
+        self.setStyleSheet(
+            "DisplayBox { background: #1a1a2e; border: 1px solid #444; }")
+        self.setMinimumHeight(80)
+
+        vlay = QVBoxLayout(self)
+        vlay.setContentsMargins(6, 4, 6, 4)
+        vlay.setSpacing(2)
+
+        self._lbl_name = QLabel("— drop signal —")
+        self._lbl_name.setAlignment(Qt.AlignCenter)
+        self._lbl_name.setStyleSheet("color: #888; font-size: 13px;")
+
+        self._lbl_value = QLabel("")
+        self._lbl_value.setAlignment(Qt.AlignCenter)
+        self._lbl_value.setStyleSheet(
+            "color: #2ecc71; font-size: 26px; font-family: monospace; font-weight: bold;")
+
+        self._lbl_stats = QLabel("")
+        self._lbl_stats.setAlignment(Qt.AlignCenter)
+        self._lbl_stats.setStyleSheet("color: #888; font-size: 12px;")
+
+        vlay.addWidget(self._lbl_name)
+        vlay.addWidget(self._lbl_value)
+        vlay.addWidget(self._lbl_stats)
+
+    # ── data ───────────────────────────────────────────────────────────────────
+
+    def set_dataframe(self, df: "pd.DataFrame") -> None:
+        self._df = df
+        self._refresh()
+
+    def _refresh(self) -> None:
+        if self._df is None or self._field is None or self._field not in self._df.columns:
+            self._lbl_value.setText("")
+            self._lbl_stats.setText("")
+            return
+        col  = self._df[self._field].to_numpy(dtype=np.float64)
+        last = col[-1] if len(col) else float("nan")
+        self._lbl_value.setText(f"{last:.6g}")
+        self._lbl_stats.setText(f"min {col.min():.6g}   max {col.max():.6g}")
+
+    def _set_field(self, field: str) -> None:
+        self._field = field
+        self._lbl_name.setText(field)
+        self._lbl_name.setStyleSheet("color: #ecf0f1; font-size: 13px;")
+        self._refresh()
+
+    def _clear(self) -> None:
+        self._field = None
+        self._lbl_name.setText("— drop signal —")
+        self._lbl_name.setStyleSheet("color: #888; font-size: 13px;")
+        self._lbl_value.setText("")
+        self._lbl_stats.setText("")
+
+    # ── drag / drop ────────────────────────────────────────────────────────────
+
+    def dragEnterEvent(self, ev):
+        if ev.mimeData().hasFormat(MIME_TYPE):
+            ev.acceptProposedAction()
+        else:
+            ev.ignore()
+
+    def dragMoveEvent(self, ev):
+        ev.acceptProposedAction()
+
+    def dropEvent(self, ev):
+        field = bytes(ev.mimeData().data(MIME_TYPE)).decode()
+        self._set_field(field)
+        ev.acceptProposedAction()
+
+    def contextMenuEvent(self, ev):
+        menu = QMenu(self)
+        if self._field:
+            menu.addAction(f"Clear: {self._field}", self._clear)
+        else:
+            menu.addAction("(empty)", lambda: None).setEnabled(False)
+        menu.exec_(ev.globalPos())
+
+
+# ── Display panel (collection of DisplayBoxes) ─────────────────────────────────
+
+class DisplayPanel(QWidget):
+    """Scrollable column of DisplayBox drop-targets."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._df:    "pd.DataFrame | None" = None
+        self._boxes: list[DisplayBox]      = []
+
+        self._inner = QWidget()
+        self._vlay  = QVBoxLayout(self._inner)
+        self._vlay.setSpacing(4)
+        self._vlay.setContentsMargins(4, 4, 4, 4)
+        self._vlay.addStretch(1)   # sentinel — always at the end
+
+        scroll = QScrollArea()
+        scroll.setWidget(self._inner)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+        self._set_count(4)
+
+    def set_count(self, n: int) -> None:
+        self._set_count(n)
+
+    def set_dataframe(self, df: "pd.DataFrame") -> None:
+        self._df = df
+        for box in self._boxes:
+            box.set_dataframe(df)
+
+    def _set_count(self, n: int) -> None:
+        while len(self._boxes) > n:
+            box = self._boxes.pop()
+            self._vlay.removeWidget(box)
+            box.deleteLater()
+        while len(self._boxes) < n:
+            box = DisplayBox(self._inner)
+            if self._df is not None:
+                box.set_dataframe(self._df)
+            self._vlay.insertWidget(len(self._boxes), box)
+            self._boxes.append(box)
+
+
 # ── Main window ────────────────────────────────────────────────────────────────
 
 class DynoLogViewer(QMainWindow):
@@ -273,6 +414,16 @@ class DynoLogViewer(QMainWindow):
         export_pdf_btn.clicked.connect(self._export_pdf)
         tlay.addWidget(export_pdf_btn)
 
+        tlay.addWidget(_vline())
+
+        tlay.addWidget(QLabel("Displays:"))
+        self._displays_spin = QSpinBox()
+        self._displays_spin.setRange(0, 20)
+        self._displays_spin.setValue(4)
+        self._displays_spin.setFixedWidth(50)
+        self._displays_spin.valueChanged.connect(self._on_display_count_changed)
+        tlay.addWidget(self._displays_spin)
+
         tlay.addStretch()
 
         self._status = QLabel("No file loaded")
@@ -288,15 +439,26 @@ class DynoLogViewer(QMainWindow):
         sig_group.setMinimumWidth(180)
         sig_group.setMaximumWidth(260)
 
-        # ── Plot grid (right panel) ────────────────────────────────────────────
+        # ── Plot grid (centre panel) ───────────────────────────────────────────
         self._grid = PlotGrid()
+
+        # ── Display panel (right panel) ────────────────────────────────────────
+        disp_group = QGroupBox("Displays")
+        disp_vlay  = QVBoxLayout(disp_group)
+        disp_vlay.setContentsMargins(4, 6, 4, 4)
+        self._display_panel = DisplayPanel()
+        disp_vlay.addWidget(self._display_panel)
+        disp_group.setMinimumWidth(160)
+        disp_group.setMaximumWidth(280)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(sig_group)
         splitter.addWidget(self._grid)
+        splitter.addWidget(disp_group)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([200, 1200])
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([200, 1000, 200])
 
         central = QWidget()
         vlay    = QVBoxLayout(central)
@@ -342,11 +504,17 @@ class DynoLogViewer(QMainWindow):
         self._df = df
         self._sig_list.populate(list(df.columns))
         self._grid.set_dataframe(df)
+        self._display_panel.set_dataframe(df)
         rows = len(df)
         dur  = (df[X_FIELD].iloc[-1] - df[X_FIELD].iloc[0]) * 1e-9 if rows > 1 else 0
         self._status.setText(
             f"{os.path.basename(path)}  |  {rows:,} rows  |  {dur:.1f} s  |  {len(df.columns)} signals"
         )
+
+    # ── Display count ──────────────────────────────────────────────────────────
+
+    def _on_display_count_changed(self):
+        self._display_panel.set_count(self._displays_spin.value())
 
     # ── Grid resize ────────────────────────────────────────────────────────────
 
