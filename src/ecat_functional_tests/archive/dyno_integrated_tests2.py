@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--topology",
-        default="config/topology.dyno2.template5.json",
+        default="config/ethercat_device_config/topology.dyno2.template5.json",
         help="Path to topology JSON file (must include all devices).",
     )
     parser.add_argument(

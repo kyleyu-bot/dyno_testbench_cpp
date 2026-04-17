@@ -51,7 +51,7 @@ using ModeOfOperation = ethercat_core::ds402::ModeOfOperation;
 
 // ── Argument defaults ─────────────────────────────────────────────────────────
 
-static constexpr const char* DEFAULT_TOPOLOGY   = "config/topology.dyno2.template6.json";
+static constexpr const char* DEFAULT_TOPOLOGY   = "config/ethercat_device_config/topology.dyno2.template6.json";
 static constexpr const char* DEFAULT_SLAVE      = "dut";
 static constexpr int         DEFAULT_SPEED       = 1000;
 static constexpr int         DEFAULT_MODE        = 9;   // CYCLIC_SYNC_VELOCITY

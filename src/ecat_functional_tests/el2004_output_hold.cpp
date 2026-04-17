@@ -45,7 +45,7 @@ static void onSignal(int) { g_shutdown.store(true); }
 
 // ── Argument defaults ─────────────────────────────────────────────────────────
 
-static constexpr const char* DEFAULT_TOPOLOGY = "config/topology.dyno2.template6.json";
+static constexpr const char* DEFAULT_TOPOLOGY = "config/ethercat_device_config/topology.dyno2.template6.json";
 static constexpr const char* DEFAULT_SLAVE    = "digital_IO";
 static constexpr double      DEFAULT_HOLD_S   = 60.0;
 static constexpr double      DEFAULT_PRINT_HZ = 2.0;

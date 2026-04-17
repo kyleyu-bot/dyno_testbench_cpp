@@ -69,7 +69,7 @@ static void onSignal(int) { g_shutdown.store(true); }
 
 // ── Argument defaults ─────────────────────────────────────────────────────────
 
-static constexpr const char* DEFAULT_TOPOLOGY      = "config/topology.dyno2.template6.json";
+static constexpr const char* DEFAULT_TOPOLOGY      = "config/ethercat_device_config/topology.dyno2.template6.json";
 static constexpr const char* DEFAULT_DRIVE_SLAVE   = "main_drive";
 static constexpr const char* DEFAULT_ENCODER_SLAVE = "encoder_interface";
 static constexpr const char* DEFAULT_TORQUE_SLAVE  = "analog_input_interface";

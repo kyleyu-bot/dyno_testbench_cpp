@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run DS402 zero-setpoint enable sequence.")
     parser.add_argument(
         "--topology",
-        default="config/topology.debug.json",
+        default="config/ethercat_device_config/topology.debug.json",
         help="Path to topology JSON file.",
     )
     parser.add_argument(

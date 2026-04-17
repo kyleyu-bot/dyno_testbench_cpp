@@ -44,7 +44,7 @@ try:
         QVBoxLayout, QHBoxLayout, QSplitter,
         QSlider, QPushButton, QLabel, QGroupBox,
         QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem,
-        QMenu, QAction, QComboBox, QTextEdit, QFormLayout,
+        QMenu, QAction, QComboBox, QTextEdit, QLineEdit, QFormLayout,
         QScrollArea, QSizePolicy,
     )
 except ImportError:
@@ -55,7 +55,7 @@ except ImportError:
 try:
     import rclpy
     from rclpy.node   import Node
-    from std_msgs.msg import String as StringMsg
+    from std_msgs.msg import String as StringMsg, Float64 as Float64Msg
 except ImportError:
     print("ERROR: rclpy not found.  source /opt/ros/humble/setup.bash", file=sys.stderr)
     sys.exit(1)
@@ -63,13 +63,44 @@ except ImportError:
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 DEFAULT_BRIDGE      = "build/dyno_ros2_bridge/bridge_ros2"
-DEFAULT_TOPOLOGY    = "config/topology.dyno2.template6.json"
+DEFAULT_TOPOLOGY    = "config/ethercat_device_config/topology.dyno2.template6.json"
 DEFAULT_PUB_HZ      = 200.0
 TEST_SCRIPTS_DIR    = "src/dyno_test_scripts"  # scanned for *.py test scripts
 DEFAULT_FAULT_S  = 2.0
 
 CMD_MIME  = "application/x-dyno-command-field"
 NUM_SLOTS = 9   # number of slider slots shown
+
+# ── Novanta error code lookup ─────────────────────────────────────────────────
+
+_ERROR_MAP_PATH = "config/novanta_error_code_mapping/error_mapping_sectioned.json"
+
+def _load_error_map(path: str) -> dict:
+    """Load all sections of the Novanta error code JSON into a flat int→str dict."""
+    try:
+        with open(path) as f:
+            raw = json.load(f)
+    except Exception:
+        return {}
+    result = {}
+    for section in raw.values():
+        for hex_str, desc in section.items():
+            try:
+                result[int(hex_str, 16)] = desc
+            except ValueError:
+                pass
+    return result
+
+_ERROR_MAP: dict = _load_error_map(_ERROR_MAP_PATH)
+
+def _lookup_error(code: int) -> str:
+    """Return a display string for a DS402 error code. Empty string when code is 0."""
+    if code == 0:
+        return ""
+    desc = _ERROR_MAP.get(code)
+    if desc:
+        return f"0x{code:08X} — {desc}"
+    return f"0x{code:08X} — Unknown error"
 
 # All drag-assignable command fields: (json_key, display_label)
 COMMAND_FIELDS = [
@@ -313,15 +344,33 @@ class DynoCommander(Node):
         self._limits_lock     = threading.Lock()
         self._main_limits     = dict(_empty_limits)
         self._dut_limits      = dict(_empty_limits)
+        self._main_error_code: int = 0
+        self._dut_error_code:  int = 0
         self._limits_callback = None   # callable(drive: str), set by DynoWindow
+
+        # Torque sensor readings — updated from /dyno/torque/{ch1,ch2}.
+        # Scales are mirrored from set_command() so scripts can query them.
+        self._ch1_torque_nm: float = 0.0
+        self._ch2_torque_nm: float = 0.0
+        self._ch1_scale_nm:  float = 200.0   # default, matches El3002Adapter ch1
+        self._ch2_scale_nm:  float = 20.0    # default, matches El3002Adapter ch2
 
         self.create_subscription(StringMsg, "/dyno/main_drive/status",
             lambda msg: self._on_status(msg, "main"), 10)
         self.create_subscription(StringMsg, "/dyno/dut/status",
             lambda msg: self._on_status(msg, "dut"), 10)
+        self.create_subscription(Float64Msg, "/dyno/torque/ch1",
+            lambda msg: self._on_torque(msg, "ch1"), 10)
+        self.create_subscription(Float64Msg, "/dyno/torque/ch2",
+            lambda msg: self._on_torque(msg, "ch2"), 10)
 
-        period = 1.0 / max(pub_hz, 1.0)
-        self.create_timer(period, self._publish)
+        self._pub_period_s = 1.0 / max(pub_hz, 1.0)
+        self.create_timer(self._pub_period_s, self._publish)
+
+    @property
+    def pub_period_s(self) -> float:
+        """Publish period in seconds (1 / pub_hz). Scripts use this as their loop dt."""
+        return self._pub_period_s
 
     def set_command(self, numeric: dict,
                     main_enable: bool, dut_enable: bool,
@@ -336,6 +385,12 @@ class DynoCommander(Node):
             self._hold_output1 = hold_output1
             self._main_mode    = main_mode
             self._dut_mode     = dut_mode
+        # Mirror torque scales so scripts can read them back via get_torque_scale().
+        with self._limits_lock:
+            if "ch1_torque_scale" in numeric:
+                self._ch1_scale_nm = float(numeric["ch1_torque_scale"])
+            if "ch2_torque_scale" in numeric:
+                self._ch2_scale_nm = float(numeric["ch2_torque_scale"])
 
     def _on_status(self, msg: StringMsg, drive: str) -> None:
         try:
@@ -360,13 +415,37 @@ class DynoCommander(Node):
             "pos_ki":     float(data.get("pos_ki",     0.0)),
             "pos_kd":     float(data.get("pos_kd",     0.0)),
         }
+        error_code = int(data.get("err", 0))
         with self._limits_lock:
             if drive == "main":
-                self._main_limits = limits
+                self._main_limits     = limits
+                self._main_error_code = error_code
             else:
-                self._dut_limits = limits
+                self._dut_limits      = limits
+                self._dut_error_code  = error_code
         if self._limits_callback:
             self._limits_callback(drive)
+
+    def get_error_code(self, drive: str) -> int:
+        with self._limits_lock:
+            return self._main_error_code if drive == "main" else self._dut_error_code
+
+    def _on_torque(self, msg: Float64Msg, channel: str) -> None:
+        with self._limits_lock:
+            if channel == "ch1":
+                self._ch1_torque_nm = msg.data
+            else:
+                self._ch2_torque_nm = msg.data
+
+    def get_torque(self, channel: str) -> float:
+        """Return the latest torque reading for 'ch1' or 'ch2' (Nm)."""
+        with self._limits_lock:
+            return self._ch1_torque_nm if channel == "ch1" else self._ch2_torque_nm
+
+    def get_torque_scale(self, channel: str) -> float:
+        """Return the current full-scale range (Nm) for 'ch1' or 'ch2'."""
+        with self._limits_lock:
+            return self._ch1_scale_nm if channel == "ch1" else self._ch2_scale_nm
 
     def set_limits_callback(self, cb) -> None:
         self._limits_callback = cb
@@ -767,7 +846,7 @@ class ScriptingPanel(QGroupBox):
         self._commander        = commander
         self._scripts_dir      = scripts_dir
         self._runner           = ScriptRunner()
-        self._param_widgets: dict[str, QDoubleSpinBox | QSpinBox] = {}
+        self._param_widgets: dict[str, QDoubleSpinBox | QSpinBox | QComboBox] = {}
         self._current_mod      = None
         self._on_script_active = on_script_active  # callable(bool) | None
         self._get_modes        = get_modes          # callable() → (main_mode, dut_mode) | None
@@ -905,6 +984,10 @@ class ScriptingPanel(QGroupBox):
                 w.setRange(-1e9, 1e9)
                 w.setSingleStep(0.1)
                 w.setValue(default)
+            elif isinstance(default, list):
+                w = QComboBox()
+                for item in default:
+                    w.addItem(str(item))
             else:
                 w = QSpinBox()
                 w.setRange(-2**30, 2**30 - 1)
@@ -913,7 +996,13 @@ class ScriptingPanel(QGroupBox):
             self._params_form.addRow(name + ":", w)
 
     def _collect_params(self) -> dict:
-        return {name: w.value() for name, w in self._param_widgets.items()}
+        result = {}
+        for name, w in self._param_widgets.items():
+            if isinstance(w, QComboBox):
+                result[name] = w.currentText()
+            else:
+                result[name] = w.value()
+        return result
 
     # ── Run / abort ───────────────────────────────────────────────────────────
 
@@ -1036,6 +1125,10 @@ class DynoWindow(QMainWindow):
         self._timer.timeout.connect(self._push_command)
         self._timer.start(5)   # 200 Hz
 
+        self._error_timer = QTimer(self)
+        self._error_timer.timeout.connect(self._refresh_all_errors)
+        self._error_timer.start(500)   # 2 Hz
+
     def _build_ui(self):
         # ── Left: command field list ───────────────────────────────────────────
         self._field_list = CommandFieldList()
@@ -1067,7 +1160,7 @@ class DynoWindow(QMainWindow):
         btn_w   = QWidget()
         btn_lay = QVBoxLayout(btn_w)
         btn_lay.setSpacing(8)
-        btn_w.setFixedWidth(160)
+        btn_w.setFixedWidth(200)
 
         self._main_enable_btn = QPushButton("Main Enable")
         self._main_enable_btn.setCheckable(True)
@@ -1148,6 +1241,57 @@ class DynoWindow(QMainWindow):
         zero_ch2_btn.setToolTip("Capture current Ch2 reading as zero offset")
         zero_ch2_btn.clicked.connect(self._cmd.pulse_torque_zero_ch2)
         btn_lay.addWidget(zero_ch2_btn)
+
+        btn_lay.addSpacing(12)
+
+        # ── Main drive fault section ──────────────────────────────────────────
+        main_fault_group = QGroupBox("Main Drive Faults")
+        main_fault_lay   = QVBoxLayout(main_fault_group)
+        main_fault_lay.setSpacing(4)
+        main_fault_lay.setContentsMargins(6, 6, 6, 6)
+
+        main_fault_lay.addWidget(QLabel("Last Error:"))
+        self._main_last_error = QLineEdit()
+        self._main_last_error.setReadOnly(True)
+        self._main_last_error.setPlaceholderText("—")
+        main_fault_lay.addWidget(self._main_last_error)
+
+        main_fault_history_btn = QPushButton("Read Fault History")
+        # TODO: connect to SDO read/write when implemented
+        main_fault_lay.addWidget(main_fault_history_btn)
+
+        self._main_fault_history = QTextEdit()
+        self._main_fault_history.setReadOnly(True)
+        self._main_fault_history.setFixedHeight(80)
+        self._main_fault_history.setPlaceholderText("(no history)")
+        main_fault_lay.addWidget(self._main_fault_history)
+
+        btn_lay.addWidget(main_fault_group)
+        btn_lay.addSpacing(8)
+
+        # ── DUT fault section ─────────────────────────────────────────────────
+        dut_fault_group = QGroupBox("DUT Faults")
+        dut_fault_lay   = QVBoxLayout(dut_fault_group)
+        dut_fault_lay.setSpacing(4)
+        dut_fault_lay.setContentsMargins(6, 6, 6, 6)
+
+        dut_fault_lay.addWidget(QLabel("Last Error:"))
+        self._dut_last_error = QLineEdit()
+        self._dut_last_error.setReadOnly(True)
+        self._dut_last_error.setPlaceholderText("—")
+        dut_fault_lay.addWidget(self._dut_last_error)
+
+        dut_fault_history_btn = QPushButton("Read Fault History")
+        # TODO: connect to SDO read/write when implemented
+        dut_fault_lay.addWidget(dut_fault_history_btn)
+
+        self._dut_fault_history = QTextEdit()
+        self._dut_fault_history.setReadOnly(True)
+        self._dut_fault_history.setFixedHeight(80)
+        self._dut_fault_history.setPlaceholderText("(no history)")
+        dut_fault_lay.addWidget(self._dut_fault_history)
+
+        btn_lay.addWidget(dut_fault_group)
 
         btn_lay.addStretch()
 
@@ -1273,6 +1417,19 @@ class DynoWindow(QMainWindow):
     def _on_limits_updated(self, drive: str) -> None:
         """Called from the ROS spin thread — schedule GUI update on the Qt thread."""
         QTimer.singleShot(0, lambda: self._refresh_slot_limits(drive))
+        QTimer.singleShot(0, lambda: self._refresh_error_display(drive))
+
+    def _refresh_all_errors(self) -> None:
+        for drive in ("main", "dut"):
+            self._refresh_error_display(drive)
+
+    def _refresh_error_display(self, drive: str) -> None:
+        code = self._cmd.get_error_code(drive)
+        text = _lookup_error(code)
+        if drive == "main":
+            self._main_last_error.setText(text)
+        else:
+            self._dut_last_error.setText(text)
 
     def _refresh_slot_limits(self, drive: str) -> None:
         prefix = "main_" if drive == "main" else "dut_"
@@ -1364,7 +1521,7 @@ def main():
     # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
     window = DynoWindow(commander)
-    window.resize(1400, 680)
+    window.resize(1400, 950)
 
     if bridge_proc is not None:
         window.set_status(f"bridge_ros2 PID {bridge_proc.pid}")
