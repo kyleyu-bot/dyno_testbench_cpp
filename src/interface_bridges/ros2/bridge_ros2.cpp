@@ -56,13 +56,8 @@ extern "C" {
 
 #include <nlohmann/json.hpp>
 
-#include <quill/Backend.h>
-#include <quill/Frontend.h>
-#include <quill/LogMacros.h>
-#include <quill/Logger.h>
-#include <quill/sinks/FileSink.h>
-
 #include <algorithm>
+#include <fstream>
 #include <cmath>
 #include <limits>
 #include <any>
@@ -91,6 +86,7 @@ using json            = nlohmann::json;
 // ── Signal handling ───────────────────────────────────────────────────────────
 
 static std::atomic<bool> g_shutdown{false};
+static std::atomic<bool> g_rotate_log{false};
 static void onSignal(int) { g_shutdown.store(true); }
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
@@ -147,6 +143,8 @@ struct CommandState {
     // One-shot zero flags — cleared by the bridge after applying.
     bool     zero_torque_ch1      = false;
     bool     zero_torque_ch2      = false;
+    // One-shot log-rotation flag — triggers drain thread to close and reopen CSV.
+    bool     save_log             = false;
 };
 
 static std::mutex      g_cmd_mutex;
@@ -226,6 +224,7 @@ public:
                     // One-shot: OR with current so a true is never lost between snapshots.
                     g_cmd_state.zero_torque_ch1    |= j.value("zero_torque_ch1", false);
                     g_cmd_state.zero_torque_ch2    |= j.value("zero_torque_ch2", false);
+                    g_cmd_state.save_log           |= j.value("save_log",        false);
                 } catch (...) {
                     RCLCPP_WARN(get_logger(), "Failed to parse /dyno/command JSON");
                 }
@@ -340,6 +339,24 @@ static std::string record_to_csv(const dyno::PdoLogRecord& r)
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
+
+/// Create test_data_log/YYYY-MM-DD/HHMMSS/dyno_pdo.csv, making all parent dirs.
+static std::string make_run_csv_path(rclcpp::Logger logger)
+{
+    std::time_t t    = std::time(nullptr);
+    std::tm*    tm_  = std::localtime(&t);
+    char date_buf[16], time_buf[8];
+    std::strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", tm_);
+    std::strftime(time_buf, sizeof(time_buf), "%H%M%S",   tm_);
+    std::string run_dir = std::string("test_data_log/") + date_buf + "/" + time_buf;
+    std::error_code ec;
+    std::filesystem::create_directories(run_dir, ec);
+    if (ec) {
+        RCLCPP_WARN(logger, "Could not create log dir '%s': %s",
+                    run_dir.c_str(), ec.message().c_str());
+    }
+    return run_dir + "/dyno_pdo.csv";
+}
 
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
@@ -534,59 +551,35 @@ int main(int argc, char** argv) {
 
     EthercatLoop loop(*rt, cfg.cycle_hz, rt_cfg);
 
-    // ── Quill logging setup ───────────────────────────────────────────────────
-    // Create test_data_log/YYYY-MM-DD/HHMMSS/ for this run.
-    std::string log_path;
-    {
-        std::time_t t   = std::time(nullptr);
-        std::tm*    tm_ = std::localtime(&t);
-
-        char date_buf[16], time_buf[8];
-        std::strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", tm_);
-        std::strftime(time_buf, sizeof(time_buf), "%H%M%S",   tm_);
-
-        std::string run_dir = std::string("test_data_log/") + date_buf + "/" + time_buf;
-
-        std::error_code ec;
-        std::filesystem::create_directories(run_dir, ec);
-        if (ec) {
-            RCLCPP_WARN(node->get_logger(),
-                "Could not create log directory '%s' (%s) — logging to cwd.",
-                run_dir.c_str(), ec.message().c_str());
-        }
-
-        log_path = run_dir + "/dyno_pdo.csv";
-    }
-
-    quill::Backend::start();
-
-    quill::FileSinkConfig fsink_cfg;
-    fsink_cfg.set_open_mode('w');
-    auto file_sink = quill::Frontend::create_or_get_sink<quill::FileSink>(log_path, fsink_cfg);
-
-    // Use a message-only pattern — we supply all timestamp info inside the CSV row.
-    quill::Logger* pdo_logger = quill::Frontend::create_or_get_logger(
-        "pdo",
-        std::move(file_sink),
-        quill::PatternFormatterOptions{"%(message)"});
-
+    // ── CSV logging setup ─────────────────────────────────────────────────────
+    std::string   log_path = make_run_csv_path(node->get_logger());
+    std::ofstream csv_file(log_path);
+    csv_file << dyno::PDO_LOG_CSV_HEADER << '\n';
     RCLCPP_INFO(node->get_logger(), "PDO log: %s", log_path.c_str());
 
     // Ring buffer shared between the RT cycle callback and the drain thread.
     // Depth 200 = ~200 ms of headroom at 1000 Hz before the drain thread catches up.
     dyno::PdoLogBuffer<200> log_buf;
 
-    // Write CSV header as first line.
-    LOG_INFO(pdo_logger, "{}", dyno::PDO_LOG_CSV_HEADER);
-
-    // Drain thread: pops records from the ring buffer and writes them via quill.
+    // Drain thread: pops records from the ring buffer and writes directly to CSV.
+    // When g_rotate_log is set (Save Log button), it flushes the current file,
+    // opens a new timestamped file, and continues logging there.
     std::thread log_drain([&]() {
         while (!g_shutdown.load() || !log_buf.empty()) {
             while (auto rec = log_buf.pop()) {
-                LOG_INFO(pdo_logger, "{}", record_to_csv(*rec));
+                csv_file << record_to_csv(*rec) << '\n';
+            }
+            if (g_rotate_log.exchange(false)) {
+                csv_file.flush();
+                csv_file.close();
+                log_path = make_run_csv_path(node->get_logger());
+                csv_file.open(log_path);
+                csv_file << dyno::PDO_LOG_CSV_HEADER << '\n';
+                RCLCPP_INFO(node->get_logger(), "PDO log rotated: %s", log_path.c_str());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
+        csv_file.close();
     });
 
     // ── Register cycle callback — fires from RT thread at EtherCAT cycle rate ─
@@ -792,6 +785,13 @@ int main(int argc, char** argv) {
         {
             std::lock_guard<std::mutex> lk(g_cmd_mutex);
             cmd = g_cmd_state;
+        }
+
+        // Handle one-shot save_log: signal the drain thread to rotate the CSV file.
+        if (cmd.save_log) {
+            g_rotate_log.store(true);
+            std::lock_guard<std::mutex> lk(g_cmd_mutex);
+            g_cmd_state.save_log = false;
         }
 
         // Apply torque sensor ADC scale to the adapter.
@@ -1020,8 +1020,7 @@ int main(int argc, char** argv) {
 
     // Drain remaining log records and flush quill's async backend.
     log_drain.join();
-    quill::Backend::stop();
-    RCLCPP_INFO(node->get_logger(), "PDO log flushed: %s", log_path.c_str());
+    RCLCPP_INFO(node->get_logger(), "PDO log saved: %s", log_path.c_str());
 
     executor->cancel();
     ros_thread.join();

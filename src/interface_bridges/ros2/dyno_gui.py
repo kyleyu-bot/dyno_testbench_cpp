@@ -331,6 +331,7 @@ class DynoCommander(Node):
         self._hold_output1      = False
         self._zero_torque_ch1   = False
         self._zero_torque_ch2   = False
+        self._save_log          = False
         self._main_mode    = DS402_DEFAULT_MODE
         self._dut_mode     = DS402_DEFAULT_MODE
 
@@ -504,6 +505,11 @@ class DynoCommander(Node):
         with self._lock:
             self._zero_torque_ch2 = True
 
+    def pulse_save_log(self):
+        """Send save_log=true for one publish cycle, triggering log rotation in the bridge."""
+        with self._lock:
+            self._save_log = True
+
     def _publish(self):
         with self._lock:
             payload = dict(self._numeric)
@@ -515,9 +521,11 @@ class DynoCommander(Node):
             payload["dut_mode"]          = self._dut_mode
             payload["zero_torque_ch1"]   = self._zero_torque_ch1
             payload["zero_torque_ch2"]   = self._zero_torque_ch2
+            payload["save_log"]          = self._save_log
             self._fault_reset          = False   # one-shot pulses
             self._zero_torque_ch1      = False
             self._zero_torque_ch2      = False
+            self._save_log             = False
 
         msg      = StringMsg()
         msg.data = json.dumps(payload)
@@ -1241,6 +1249,14 @@ class DynoWindow(QMainWindow):
         zero_ch2_btn.setToolTip("Capture current Ch2 reading as zero offset")
         zero_ch2_btn.clicked.connect(self._cmd.pulse_torque_zero_ch2)
         btn_lay.addWidget(zero_ch2_btn)
+
+        btn_lay.addSpacing(12)
+
+        save_log_btn = QPushButton("Save Log")
+        save_log_btn.setToolTip(
+            "Close the current CSV log and start a new file with a fresh timestamp")
+        save_log_btn.clicked.connect(self._cmd.pulse_save_log)
+        btn_lay.addWidget(save_log_btn)
 
         btn_lay.addSpacing(12)
 
