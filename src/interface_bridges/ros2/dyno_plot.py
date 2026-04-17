@@ -181,7 +181,7 @@ class DynoPlotNode(Node):
                 pass
 
     def _on_float(self, msg: Float64, topic: str) -> None:
-        self._store.push(topic, "value", time.monotonic(), msg.data)
+        self._store.push(topic, "torque_nm", time.monotonic(), msg.data)
 
     def _on_uint(self, msg: UInt32, topic: str) -> None:
         self._store.push(topic, "value", time.monotonic(), float(msg.data))

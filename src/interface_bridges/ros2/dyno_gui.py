@@ -69,7 +69,9 @@ TEST_SCRIPTS_DIR    = "src/dyno_test_scripts"  # scanned for *.py test scripts
 DEFAULT_FAULT_S  = 2.0
 
 CMD_MIME  = "application/x-dyno-command-field"
-NUM_SLOTS = 9   # number of slider slots shown
+NUM_SLOTS      = 9   # number of slider slots shown
+NUM_SPIN_SLOTS = 6   # spinbox slots per row
+NUM_SPIN_ROWS  = 2   # number of spinbox rows below sliders
 
 # ── Novanta error code lookup ─────────────────────────────────────────────────
 
@@ -589,6 +591,7 @@ class SliderSlot(QGroupBox):
 
         # Max spinbox
         self._max_spin = QSpinBox()
+        self._max_spin.setKeyboardTracking(False)
         self._max_spin.setRange(_SPIN_LO, _SPIN_HI)
         self._max_spin.setValue(1000)
         self._max_spin.setPrefix("Max: ")
@@ -603,22 +606,26 @@ class SliderSlot(QGroupBox):
 
         # Min spinbox
         self._min_spin = QSpinBox()
+        self._min_spin.setKeyboardTracking(False)
         self._min_spin.setRange(_SPIN_LO, _SPIN_HI)
         self._min_spin.setValue(-1000)
         self._min_spin.setPrefix("Min: ")
 
         # Exact entry spinbox (integer mode)
         self._exact_spin = QSpinBox()
+        self._exact_spin.setKeyboardTracking(False)
         self._exact_spin.setRange(-1000, 1000)
         self._exact_spin.setValue(0)
 
         # Float spinbox (gain mode — replaces slider+exact_spin)
         self._float_spin = QDoubleSpinBox()
+        self._float_spin.setKeyboardTracking(False)
         self._float_spin.setRange(0.0, 20.0)
         self._float_spin.setSingleStep(0.001)
         self._float_spin.setDecimals(3)
         self._float_spin.setValue(0.0)
         self._float_spin.hide()
+        self._committed_float: float = 0.0
 
         # Value display
         self._val_label = QLabel("0")
@@ -680,6 +687,7 @@ class SliderSlot(QGroupBox):
         self._val_label.setText(str(v))
 
     def _on_float_changed(self, v: float):
+        self._committed_float = v
         self._val_label.setText(f"{v:.3f}")
 
     # ── float mode ────────────────────────────────────────────────────────────
@@ -694,6 +702,7 @@ class SliderSlot(QGroupBox):
         self._float_spin.blockSignals(True)
         self._float_spin.setRange(lo, hi)
         self._float_spin.setValue(default)
+        self._committed_float = default
         self._float_spin.blockSignals(False)
         self._val_label.setText(f"{default:.3f}")
         self._float_spin.show()
@@ -805,12 +814,13 @@ class SliderSlot(QGroupBox):
     def value(self):
         """Return float if in gain mode, int otherwise."""
         if self._float_mode:
-            return self._float_spin.value()
+            return self._committed_float
         return self._slider.value()
 
     def zero(self):
         if self._float_mode:
             self._float_spin.setValue(0.0)
+            self._committed_float = 0.0
         else:
             self._slider.setValue(0)
 
@@ -832,6 +842,145 @@ class SliderSlot(QGroupBox):
         self._exact_spin.setMaximum(hi_i)
         for w in (self._min_spin, self._max_spin, self._slider, self._exact_spin):
             w.blockSignals(False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Spinbox slot (drop target)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SpinboxSlot(QGroupBox):
+    """
+    A single labelled QDoubleSpinBox drop target.
+    Drop a command field from CommandFieldList to assign what it controls.
+    Right-click to unassign.
+    Values apply on Enter / focus-out (keyboardTracking=False + _committed).
+    """
+
+    _PLACEHOLDER = "— drop field —"
+
+    def __init__(self, on_drop=None, is_field_allowed=None,
+                 on_assigned=None, on_unassigned=None, parent=None):
+        super().__init__(SpinboxSlot._PLACEHOLDER, parent)
+        self._field: str | None = None
+        self._on_drop          = on_drop
+        self._is_field_allowed = is_field_allowed
+        self._on_assigned      = on_assigned
+        self._on_unassigned    = on_unassigned
+        self._committed: float = 0.0
+        self.setAcceptDrops(True)
+        self.setMinimumWidth(90)
+
+        self._spin = QDoubleSpinBox()
+        self._spin.setRange(-1e9, 1e9)
+        self._spin.setDecimals(3)
+        self._spin.setSingleStep(1.0)
+        self._spin.setValue(0.0)
+        self._spin.setKeyboardTracking(False)
+        self._spin.setEnabled(False)
+
+        self._clear_btn = QPushButton("Clear")
+        self._clear_btn.setEnabled(False)
+        self._clear_btn.clicked.connect(self._unassign)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(self._spin)
+        lay.addWidget(self._clear_btn)
+
+        self._spin.valueChanged.connect(self._on_value_changed)
+
+    def _on_value_changed(self, v: float):
+        self._committed = v
+
+    # ── drag / drop ───────────────────────────────────────────────────────────
+
+    def dragEnterEvent(self, ev):
+        if ev.mimeData().hasFormat(CMD_MIME):
+            key = bytes(ev.mimeData().data(CMD_MIME)).decode()
+            if key != self._field and self._is_field_allowed and \
+                    not self._is_field_allowed(key):
+                ev.ignore()
+                return
+            ev.acceptProposedAction()
+        else:
+            ev.ignore()
+
+    def dragMoveEvent(self, ev):
+        ev.acceptProposedAction()
+
+    def dropEvent(self, ev):
+        key = bytes(ev.mimeData().data(CMD_MIME)).decode()
+        self._assign(key)
+        if self._on_drop:
+            result = self._on_drop(key)
+            if result is not None:
+                lo, hi, default = result
+                is_gain = key in GAIN_FIELDS
+                self._spin.blockSignals(True)
+                self._spin.setDecimals(3 if is_gain else 1)
+                self._spin.setSingleStep(0.001 if is_gain else 1.0)
+                self._spin.setRange(lo, hi)
+                self._spin.setValue(float(default))
+                self._committed = float(default)
+                self._spin.blockSignals(False)
+        ev.acceptProposedAction()
+
+    def contextMenuEvent(self, ev):
+        if self._field is None:
+            return
+        menu = QMenu(self)
+        act  = QAction("Unassign", self)
+        act.triggered.connect(self._unassign)
+        menu.addAction(act)
+        menu.exec_(ev.globalPos())
+
+    # ── assignment ────────────────────────────────────────────────────────────
+
+    def _assign(self, key: str):
+        if self._field == key:
+            return
+        if self._field is not None and self._on_unassigned:
+            self._on_unassigned(self._field)
+        self._field = key
+        label = next((l for k, l in COMMAND_FIELDS if k == key), key)
+        self.setTitle(label)
+        self._spin.setEnabled(True)
+        self._clear_btn.setEnabled(True)
+        if self._on_assigned:
+            self._on_assigned(key)
+
+    def _unassign(self):
+        old = self._field
+        self._field = None
+        self.setTitle(SpinboxSlot._PLACEHOLDER)
+        self._spin.blockSignals(True)
+        self._spin.setValue(0.0)
+        self._committed = 0.0
+        self._spin.blockSignals(False)
+        self._spin.setEnabled(False)
+        self._clear_btn.setEnabled(False)
+        if old is not None and self._on_unassigned:
+            self._on_unassigned(old)
+
+    # ── public API ────────────────────────────────────────────────────────────
+
+    @property
+    def field(self) -> str | None:
+        return self._field
+
+    @property
+    def value(self) -> float:
+        return self._committed
+
+    def zero(self):
+        self._spin.blockSignals(True)
+        self._spin.setValue(0.0)
+        self._committed = 0.0
+        self._spin.blockSignals(False)
+
+    def apply_limits(self, lo: float, hi: float):
+        self._spin.blockSignals(True)
+        self._spin.setRange(lo, hi)
+        self._spin.blockSignals(False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -988,6 +1137,7 @@ class ScriptingPanel(QGroupBox):
         for name, default in params.items():
             if isinstance(default, float):
                 w = QDoubleSpinBox()
+                w.setKeyboardTracking(False)
                 w.setDecimals(4)
                 w.setRange(-1e9, 1e9)
                 w.setSingleStep(0.1)
@@ -998,6 +1148,7 @@ class ScriptingPanel(QGroupBox):
                     w.addItem(str(item))
             else:
                 w = QSpinBox()
+                w.setKeyboardTracking(False)
                 w.setRange(-2**30, 2**30 - 1)
                 w.setValue(int(default))
             self._param_widgets[name] = w
@@ -1157,6 +1308,30 @@ class DynoWindow(QMainWindow):
         slots_lay.setSpacing(6)
         for slot in self._slots:
             slots_lay.addWidget(slot)
+
+        # ── Spinbox rows (below sliders, full-width) ──────────────────────────
+        self._spin_slots = [
+            SpinboxSlot(
+                on_drop          = self._cmd.get_limits,
+                is_field_allowed = lambda key: key not in self._assigned_fields,
+                on_assigned      = lambda key: self._assigned_fields.add(key),
+                on_unassigned    = lambda key: self._assigned_fields.discard(key),
+            )
+            for _ in range(NUM_SPIN_SLOTS * NUM_SPIN_ROWS)
+        ]
+        spin_area     = QWidget()
+        spin_area_lay = QVBoxLayout(spin_area)
+        spin_area_lay.setContentsMargins(0, 0, 0, 0)
+        spin_area_lay.setSpacing(4)
+        for row in range(NUM_SPIN_ROWS):
+            row_w   = QWidget()
+            row_lay = QHBoxLayout(row_w)
+            row_lay.setSpacing(6)
+            row_lay.setContentsMargins(0, 0, 0, 0)
+            for slot in self._spin_slots[row * NUM_SPIN_SLOTS:(row + 1) * NUM_SPIN_SLOTS]:
+                row_lay.addWidget(slot)
+            row_lay.addStretch()
+            spin_area_lay.addWidget(row_w)
 
         # ── Right panel: buttons + scripting side by side ─────────────────────
         right_w   = QWidget()
@@ -1350,6 +1525,7 @@ class DynoWindow(QMainWindow):
         central = QWidget()
         vlay    = QVBoxLayout(central)
         vlay.addWidget(splitter, 1)
+        vlay.addWidget(spin_area)
         vlay.addWidget(self._status_label)
         self.setCentralWidget(central)
 
@@ -1380,9 +1556,15 @@ class DynoWindow(QMainWindow):
         for slot in self._slots:
             if slot.field in MAIN_ZERO_FIELDS:
                 slot.zero()
+        for slot in self._spin_slots:
+            if slot.field in MAIN_ZERO_FIELDS:
+                slot.zero()
 
     def _dut_zero(self):
         for slot in self._slots:
+            if slot.field in DUT_ZERO_FIELDS:
+                slot.zero()
+        for slot in self._spin_slots:
             if slot.field in DUT_ZERO_FIELDS:
                 slot.zero()
 
@@ -1427,6 +1609,9 @@ class DynoWindow(QMainWindow):
         for slot in self._slots:
             if slot.field is not None:
                 numeric[slot.field] = slot.value
+        for slot in self._spin_slots:
+            if slot.field is not None:
+                numeric[slot.field] = slot.value
         numeric["ch1_torque_scale"] = self._ch1_scale
         numeric["ch2_torque_scale"] = self._ch2_scale
         self._cmd.set_command(
@@ -1456,7 +1641,7 @@ class DynoWindow(QMainWindow):
 
     def _refresh_slot_limits(self, drive: str) -> None:
         prefix = "main_" if drive == "main" else "dut_"
-        for slot in self._slots:
+        for slot in self._slots + self._spin_slots:
             if slot.field and slot.field.startswith(prefix):
                 result = self._cmd.get_limits(slot.field)
                 if result is not None:
@@ -1544,7 +1729,7 @@ def main():
     # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
     window = DynoWindow(commander)
-    window.resize(1400, 950)
+    window.resize(1400, 1100)
 
     if bridge_proc is not None:
         window.set_status(f"bridge_ros2 PID {bridge_proc.pid}")
