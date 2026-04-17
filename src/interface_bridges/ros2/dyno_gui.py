@@ -44,7 +44,7 @@ try:
         QVBoxLayout, QHBoxLayout, QSplitter,
         QSlider, QPushButton, QLabel, QGroupBox,
         QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem,
-        QMenu, QAction, QComboBox, QTextEdit, QLineEdit, QFormLayout,
+        QMenu, QAction, QComboBox, QTextEdit, QFormLayout,
         QScrollArea, QSizePolicy,
     )
 except ImportError:
@@ -1267,8 +1267,12 @@ class DynoWindow(QMainWindow):
         main_fault_lay.setContentsMargins(6, 6, 6, 6)
 
         main_fault_lay.addWidget(QLabel("Last Error:"))
-        self._main_last_error = QLineEdit()
+        self._main_last_error = QTextEdit()
         self._main_last_error.setReadOnly(True)
+        self._main_last_error.setLineWrapMode(QTextEdit.NoWrap)
+        self._main_last_error.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._main_last_error.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._main_last_error.setFixedHeight(44)
         self._main_last_error.setPlaceholderText("—")
         main_fault_lay.addWidget(self._main_last_error)
 
@@ -1292,8 +1296,12 @@ class DynoWindow(QMainWindow):
         dut_fault_lay.setContentsMargins(6, 6, 6, 6)
 
         dut_fault_lay.addWidget(QLabel("Last Error:"))
-        self._dut_last_error = QLineEdit()
+        self._dut_last_error = QTextEdit()
         self._dut_last_error.setReadOnly(True)
+        self._dut_last_error.setLineWrapMode(QTextEdit.NoWrap)
+        self._dut_last_error.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._dut_last_error.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._dut_last_error.setFixedHeight(44)
         self._dut_last_error.setPlaceholderText("—")
         dut_fault_lay.addWidget(self._dut_last_error)
 
@@ -1442,10 +1450,9 @@ class DynoWindow(QMainWindow):
     def _refresh_error_display(self, drive: str) -> None:
         code = self._cmd.get_error_code(drive)
         text = _lookup_error(code)
-        if drive == "main":
-            self._main_last_error.setText(text)
-        else:
-            self._dut_last_error.setText(text)
+        widget = self._main_last_error if drive == "main" else self._dut_last_error
+        if widget.toPlainText() != text:
+            widget.setPlainText(text)
 
     def _refresh_slot_limits(self, drive: str) -> None:
         prefix = "main_" if drive == "main" else "dut_"
