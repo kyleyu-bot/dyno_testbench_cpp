@@ -71,8 +71,9 @@ DEFAULT_FAULT_S  = 2.0
 
 CMD_MIME  = "application/x-dyno-command-field"
 NUM_SLOTS      = 9   # number of slider slots shown
-NUM_SPIN_SLOTS = 6   # spinbox slots per row
-NUM_SPIN_ROWS  = 2   # number of spinbox rows below sliders
+NUM_SPIN_SLOTS  = 6   # spinbox slots per row
+NUM_SPIN_ROWS   = 2   # number of spinbox rows below sliders
+SDO_TIMEOUT_S   = 3.0 # seconds before an SDO request is declared timed out
 
 # ── Novanta error code lookup ─────────────────────────────────────────────────
 
@@ -1394,6 +1395,9 @@ class DynoWindow(QMainWindow):
         self._build_ui()
         commander.set_limits_callback(self._on_limits_updated)
 
+        self._fault_hist_state: dict | None = None  # active fault-history read state
+        self._sdo_pending_time: float | None = None  # monotonic time of last SDO request
+
         self._sdo_poll_timer = QTimer(self)
         self._sdo_poll_timer.timeout.connect(self._poll_sdo_response)
         self._sdo_poll_timer.start(50)   # 20 Hz
@@ -1570,7 +1574,7 @@ class DynoWindow(QMainWindow):
         main_fault_lay.addWidget(self._main_last_error)
 
         main_fault_history_btn = QPushButton("Read Fault History")
-        # TODO: connect to SDO read/write when implemented
+        main_fault_history_btn.clicked.connect(lambda: self._read_fault_history("main"))
         main_fault_lay.addWidget(main_fault_history_btn)
 
         self._main_fault_history = QTextEdit()
@@ -1599,7 +1603,7 @@ class DynoWindow(QMainWindow):
         dut_fault_lay.addWidget(self._dut_last_error)
 
         dut_fault_history_btn = QPushButton("Read Fault History")
-        # TODO: connect to SDO read/write when implemented
+        dut_fault_history_btn.clicked.connect(lambda: self._read_fault_history("dut"))
         dut_fault_lay.addWidget(dut_fault_history_btn)
 
         self._dut_fault_history = QTextEdit()
@@ -1816,9 +1820,82 @@ class DynoWindow(QMainWindow):
     # ── SDO handlers ──────────────────────────────────────────────────────────
 
     def _poll_sdo_response(self):
+        now = time.monotonic()
+
+        # Timeout: fault history sequence waiting too long for next response
+        if self._fault_hist_state is not None:
+            if now - self._fault_hist_state["request_time"] > SDO_TIMEOUT_S:
+                drive  = self._fault_hist_state["drive"]
+                sub    = self._fault_hist_state["next_sub"]
+                widget = self._main_fault_history if drive == "main" else self._dut_fault_history
+                widget.setPlainText(f"Timeout on sub 0x{sub:02X}")
+                self._fault_hist_state = None
+                return
+
+        # Timeout: regular SDO read/write waiting too long
+        if self._fault_hist_state is None and self._sdo_pending_time is not None:
+            if now - self._sdo_pending_time > SDO_TIMEOUT_S:
+                self._sdo_feedback.setPlainText("Timeout — no response from bridge")
+                self._sdo_pending_time = None
+
         data = self._cmd.pop_sdo_response()
-        if data is not None:
+        if data is None:
+            return
+        if self._fault_hist_state is not None:
+            self._handle_fault_hist_response(data)
+        else:
+            self._sdo_pending_time = None
             self._on_sdo_response(data)
+
+    def _read_fault_history(self, drive: str):
+        widget = self._main_fault_history if drive == "main" else self._dut_fault_history
+        widget.setPlainText("…reading…")
+        self._fault_hist_state = {
+            "drive": drive, "next_sub": 0, "results": [],
+            "request_time": time.monotonic(),
+        }
+        # sub 0x00 is UINT8 (error count), subs 1–4 are UINT32
+        self._cmd.request_sdo(drive, "read", 0x1003, 0x00, 1)
+
+    def _handle_fault_hist_response(self, data: dict):
+        state  = self._fault_hist_state
+        drive  = state["drive"]
+        widget = self._main_fault_history if drive == "main" else self._dut_fault_history
+        state["results"].append(data)
+        # Abort on any failure — avoids queuing further SDO requests to a
+        # slave that isn't responding (each would pause the RT PDO loop).
+        if not data.get("success"):
+            self._fault_hist_state = None
+            self._render_fault_history(state["results"], widget)
+            return
+        next_sub = state["next_sub"] + 1
+        state["next_sub"] = next_sub
+        if next_sub <= 4:
+            state["request_time"] = time.monotonic()
+            self._cmd.request_sdo(drive, "read", 0x1003, next_sub, 4)
+        else:
+            self._fault_hist_state = None
+            self._render_fault_history(state["results"], widget)
+
+    def _render_fault_history(self, results: list, widget) -> None:
+        if not results or not results[0].get("success"):
+            widget.setPlainText("Read failed")
+            return
+        num_errors = results[0].get("value", 0)
+        if num_errors == 0:
+            widget.setPlainText("No faults stored")
+            return
+        lines = [f"{num_errors} fault(s) stored:"]
+        for i, entry in enumerate(results[1:], 1):
+            if i > num_errors:
+                break
+            if entry.get("success"):
+                code = entry.get("value", 0)
+                desc = _lookup_error(code)
+                lines.append(f"[{i}] {desc}" if desc else f"[{i}] 0x{code:08X}")
+            else:
+                lines.append(f"[{i}] read failed")
+        widget.setPlainText("\n".join(lines))
 
     def _sdo_lookup_register(self):
         """Update reg_info label and auto-set size when index/sub change."""
@@ -1845,6 +1922,7 @@ class DynoWindow(QMainWindow):
         subindex = int(self._sdo_sub.text()   or "0", 16)
         size     = [1, 2, 4][self._sdo_size.currentIndex()]
         self._sdo_feedback.setPlainText("…waiting…")
+        self._sdo_pending_time = time.monotonic()
         self._cmd.request_sdo(drive, "read", index, subindex, size)
 
     def _sdo_write(self):
@@ -1864,6 +1942,7 @@ class DynoWindow(QMainWindow):
             self._sdo_feedback.setPlainText(f"Parse error: {e}")
             return
         self._sdo_feedback.setPlainText("…waiting…")
+        self._sdo_pending_time = time.monotonic()
         self._cmd.request_sdo(drive, "write", index, subindex, size, raw_uint)
 
     def _on_sdo_response(self, data: dict):

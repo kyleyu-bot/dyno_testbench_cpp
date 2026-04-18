@@ -891,30 +891,49 @@ int main(int argc, char** argv) {
                 resp.index    = req.index;
                 resp.subindex = req.subindex;
                 resp.size     = req.size;
-                uint8_t buf[8] = {};
-                if (req.is_write) {
-                    std::memcpy(buf, &req.value, static_cast<size_t>(req.size));
-                    int rc = ec_SDOwrite(static_cast<uint16_t>(req.slave_idx),
-                                        req.index, req.subindex,
-                                        FALSE, req.size, buf, EC_TIMEOUTRXM);
-                    resp.success = (rc > 0);
-                    resp.value   = req.value;
-                    if (!resp.success)
-                        resp.error = "ec_SDOwrite failed (rc=" + std::to_string(rc) + ")";
+
+                // EC_TIMEOUTSAFE = 20 ms — plenty for an operational drive.
+                static constexpr int SDO_TIMEOUT_US = EC_TIMEOUTSAFE;
+
+                if (req.slave_idx < 1) {
+                    resp.success = false;
+                    resp.error   = "Slave not present (index="
+                                   + std::to_string(req.slave_idx) + ")";
+                } else if ((ec_slave[req.slave_idx].state & 0x0F) < EC_STATE_PRE_OP) {
+                    resp.success = false;
+                    resp.error   = "Slave not mailbox-ready (state=0x"
+                                   + std::to_string(ec_slave[req.slave_idx].state & 0x0F) + ")";
                 } else {
-                    int sz = req.size;
-                    int rc = ec_SDOread(static_cast<uint16_t>(req.slave_idx),
-                                       req.index, req.subindex,
-                                       FALSE, &sz, buf, EC_TIMEOUTRXM);
-                    resp.success = (rc > 0);
-                    resp.size    = sz;
-                    if (resp.success) {
-                        int64_t v = 0;
-                        std::memcpy(&v, buf, static_cast<size_t>(sz));
-                        resp.value = v;
+                    // Stop the RT PDO loop so the mailbox call is never concurrent
+                    // with ec_send_processdata / ec_receive_processdata — SOEM is
+                    // not thread-safe and concurrent calls corrupt shared state.
+                    loop.stop();
+                    uint8_t buf[8] = {};
+                    if (req.is_write) {
+                        std::memcpy(buf, &req.value, static_cast<size_t>(req.size));
+                        int rc = ec_SDOwrite(static_cast<uint16_t>(req.slave_idx),
+                                             req.index, req.subindex,
+                                             FALSE, req.size, buf, SDO_TIMEOUT_US);
+                        resp.success = (rc > 0);
+                        resp.value   = req.value;
+                        if (!resp.success)
+                            resp.error = "ec_SDOwrite failed (rc=" + std::to_string(rc) + ")";
                     } else {
-                        resp.error = "ec_SDOread failed (rc=" + std::to_string(rc) + ")";
+                        int sz = req.size;
+                        int rc = ec_SDOread(static_cast<uint16_t>(req.slave_idx),
+                                            req.index, req.subindex,
+                                            FALSE, &sz, buf, SDO_TIMEOUT_US);
+                        resp.success = (rc > 0);
+                        resp.size    = sz;
+                        if (resp.success) {
+                            int64_t v = 0;
+                            std::memcpy(&v, buf, static_cast<size_t>(sz));
+                            resp.value = v;
+                        } else {
+                            resp.error = "ec_SDOread failed (rc=" + std::to_string(rc) + ")";
+                        }
                     }
+                    loop.start();  // resume PDO
                 }
                 node->publishSdoResponse(resp);
             }
