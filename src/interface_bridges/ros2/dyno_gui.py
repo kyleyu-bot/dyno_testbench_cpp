@@ -29,6 +29,7 @@ import inspect
 import json
 import os
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -37,15 +38,15 @@ import traceback
 
 # ── Qt ────────────────────────────────────────────────────────────────────────
 try:
-    from PyQt5.QtCore    import Qt, QTimer, QMimeData, QByteArray
-    from PyQt5.QtGui     import QFont
+    from PyQt5.QtCore    import Qt, QTimer, QMimeData, QByteArray, QRegularExpression
+    from PyQt5.QtGui     import QFont, QRegularExpressionValidator
     from PyQt5.QtWidgets import (
         QApplication, QMainWindow, QWidget,
         QVBoxLayout, QHBoxLayout, QSplitter,
         QSlider, QPushButton, QLabel, QGroupBox,
         QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem,
         QMenu, QAction, QComboBox, QTextEdit, QFormLayout,
-        QScrollArea, QSizePolicy,
+        QScrollArea, QSizePolicy, QLineEdit,
     )
 except ImportError:
     print("ERROR: PyQt5 not found.  pip install PyQt5", file=sys.stderr)
@@ -104,6 +105,85 @@ def _lookup_error(code: int) -> str:
         return f"0x{code:08X} — {desc}"
     return f"0x{code:08X} — Unknown error"
 
+# ── Novanta register map ──────────────────────────────────────────────────────
+
+_REGISTER_MAP_PATH = "config/novanta_register_list/novanta_ethercat_registers_list.json"
+
+def _load_register_map(path: str) -> dict:
+    """Load register list into {(index_int, subindex_int): entry} dict."""
+    try:
+        with open(path) as f:
+            entries = json.load(f)
+    except Exception:
+        return {}
+    result = {}
+    for e in entries:
+        try:
+            idx = int(e["Index"], 16)
+            sub = int(e["Sub Index"], 16)
+            result[(idx, sub)] = e
+        except Exception:
+            pass
+    return result
+
+_REGISTER_MAP: dict = _load_register_map(_REGISTER_MAP_PATH)
+
+def _dtype_size(dtype: str) -> int:
+    """Return byte size for a register Data Type string."""
+    dt = dtype.upper()
+    if dt in ("INT8", "UINT8"):
+        return 1
+    if dt in ("INT16", "UINT16"):
+        return 2
+    if dt in ("INT32", "UINT32", "FLOAT", "FLOAT32"):
+        return 4
+    if dt in ("UINT64",):
+        return 8
+    return 4  # default
+
+def _decode_sdo_value(raw_int: int, dtype: str) -> str:
+    """Format a raw integer value read from SDO according to its data type."""
+    dt = dtype.upper()
+    size = _dtype_size(dtype)
+    if dt in ("FLOAT", "FLOAT32"):
+        raw_bytes = raw_int.to_bytes(4, "little", signed=False)
+        (f,) = struct.unpack("<f", raw_bytes)
+        return f"{f:.6g}"
+    if dt in ("INT8", "INT16", "INT32"):
+        signed_map = {1: "<b", 2: "<h", 4: "<i"}
+        raw_bytes = raw_int.to_bytes(size, "little", signed=False)
+        (v,) = struct.unpack(signed_map[size], raw_bytes)
+        return f"{v}  (0x{raw_int:0{size*2}X})"
+    # unsigned int / other
+    return f"{raw_int}  (0x{raw_int:0{size*2}X})"
+
+def _encode_sdo_value(text: str, dtype: str) -> tuple:
+    """
+    Parse user-entered text as the given data type and return (raw_uint, size).
+    raw_uint is the integer whose bytes will be written via SDO.
+    """
+    dt = dtype.upper()
+    size = _dtype_size(dtype)
+    text = text.strip()
+    if not text:
+        return 0, size
+    if dt in ("FLOAT", "FLOAT32"):
+        f = float(text)
+        raw_bytes = struct.pack("<f", f)
+        raw_uint = int.from_bytes(raw_bytes, "little")
+        return raw_uint, 4
+    if dt in ("INT8", "INT16", "INT32"):
+        signed_map = {1: "<b", 2: "<h", 4: "<i"}
+        # accept decimal or hex
+        v = int(text, 0)
+        raw_bytes = struct.pack(signed_map[size], v)
+        raw_uint = int.from_bytes(raw_bytes, "little")
+        return raw_uint, size
+    # unsigned / default
+    v = int(text, 0)
+    return v, size
+
+# ── All drag-assignable command fields ────────────────────────────────────────
 # All drag-assignable command fields: (json_key, display_label)
 COMMAND_FIELDS = [
     ("main_velocity",   "Main Velocity"),
@@ -367,6 +447,12 @@ class DynoCommander(Node):
         self.create_subscription(Float64Msg, "/dyno/torque/ch2",
             lambda msg: self._on_torque(msg, "ch2"), 10)
 
+        # SDO request/response
+        self._sdo_pub = self.create_publisher(StringMsg, "/dyno/sdo_request", 10)
+        self._pending_sdo_response = None   # written by ROS thread, read by Qt timer
+        self.create_subscription(StringMsg, "/dyno/sdo_response",
+            self._on_sdo_response, 10)
+
         self._pub_period_s = 1.0 / max(pub_hz, 1.0)
         self.create_timer(self._pub_period_s, self._publish)
 
@@ -511,6 +597,34 @@ class DynoCommander(Node):
         """Send save_log=true for one publish cycle, triggering log rotation in the bridge."""
         with self._lock:
             self._save_log = True
+
+    def request_sdo(self, drive: str, op: str,
+                    index: int, subindex: int, size: int, value: int = 0) -> None:
+        payload = {
+            "drive":    drive,
+            "op":       op,
+            "index":    f"{index:04X}",
+            "subindex": f"{subindex:02X}",
+            "size":     size,
+            "value":    value,
+        }
+        msg      = StringMsg()
+        msg.data = json.dumps(payload)
+        self._sdo_pub.publish(msg)
+
+    def _on_sdo_response(self, msg: StringMsg) -> None:
+        try:
+            data = json.loads(msg.data)
+        except Exception:
+            return
+        with self._limits_lock:
+            self._pending_sdo_response = data
+
+    def pop_sdo_response(self):
+        with self._limits_lock:
+            data = self._pending_sdo_response
+            self._pending_sdo_response = None
+            return data
 
     def _publish(self):
         with self._lock:
@@ -1280,6 +1394,10 @@ class DynoWindow(QMainWindow):
         self._build_ui()
         commander.set_limits_callback(self._on_limits_updated)
 
+        self._sdo_poll_timer = QTimer(self)
+        self._sdo_poll_timer.timeout.connect(self._poll_sdo_response)
+        self._sdo_poll_timer.start(50)   # 20 Hz
+
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._push_command)
         self._timer.start(5)   # 200 Hz
@@ -1505,8 +1623,80 @@ class DynoWindow(QMainWindow):
         )
         self._script_panel.setMinimumWidth(280)
 
+        # ── SDO access panel ──────────────────────────────────────────────────
+        _hex_validator = QRegularExpressionValidator(
+            QRegularExpression("[0-9A-Fa-f]{0,8}"))
+
+        sdo_group = QGroupBox("SDO Access")
+        sdo_lay   = QVBoxLayout(sdo_group)
+        sdo_lay.setSpacing(4)
+        sdo_group.setFixedWidth(200)
+
+        self._sdo_drive = QComboBox()
+        self._sdo_drive.addItems(["main", "dut"])
+
+        self._sdo_index = QLineEdit()
+        self._sdo_index.setValidator(_hex_validator)
+        self._sdo_index.setPlaceholderText("6040")
+        self._sdo_index.setMaxLength(4)
+
+        self._sdo_sub = QLineEdit()
+        self._sdo_sub.setValidator(_hex_validator)
+        self._sdo_sub.setPlaceholderText("00")
+        self._sdo_sub.setMaxLength(2)
+
+        self._sdo_size = QComboBox()
+        self._sdo_size.addItems(["1 byte", "2 bytes", "4 bytes"])
+        self._sdo_size.setCurrentIndex(1)  # default 2 bytes
+
+        self._sdo_value = QLineEdit()
+        self._sdo_value.setPlaceholderText("value")
+
+        self._sdo_reg_info = QLabel("")
+        self._sdo_reg_info.setFont(QFont("Monospace", 7))
+        self._sdo_reg_info.setWordWrap(True)
+        self._sdo_reg_info.setStyleSheet("color: #888;")
+
+        self._sdo_index.textChanged.connect(self._sdo_lookup_register)
+        self._sdo_sub.textChanged.connect(self._sdo_lookup_register)
+
+        sdo_read_btn  = QPushButton("Read SDO")
+        sdo_write_btn = QPushButton("Write SDO")
+        sdo_read_btn.clicked.connect(self._sdo_read)
+        sdo_write_btn.clicked.connect(self._sdo_write)
+        sdo_btn_row = QHBoxLayout()
+        sdo_btn_row.addWidget(sdo_read_btn)
+        sdo_btn_row.addWidget(sdo_write_btn)
+
+        self._sdo_feedback = QTextEdit()
+        self._sdo_feedback.setReadOnly(True)
+        self._sdo_feedback.setFont(QFont("Monospace", 8))
+        self._sdo_feedback.setMinimumHeight(80)
+        self._sdo_feedback.setPlaceholderText("(result)")
+
+        def _sdo_hex_row(label: str, widget: QLineEdit) -> QHBoxLayout:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            row.addWidget(QLabel("0x"))
+            row.addWidget(widget, 1)
+            return row
+
+        sdo_lay.addWidget(QLabel("Drive:"))
+        sdo_lay.addWidget(self._sdo_drive)
+        sdo_lay.addLayout(_sdo_hex_row("Index:", self._sdo_index))
+        sdo_lay.addLayout(_sdo_hex_row("Sub:",   self._sdo_sub))
+        sdo_lay.addWidget(self._sdo_reg_info)
+        sdo_lay.addWidget(QLabel("Size:"))
+        sdo_lay.addWidget(self._sdo_size)
+        sdo_lay.addWidget(QLabel("Value:"))
+        sdo_lay.addWidget(self._sdo_value)
+        sdo_lay.addLayout(sdo_btn_row)
+        sdo_lay.addWidget(QLabel("Response:"))
+        sdo_lay.addWidget(self._sdo_feedback, 1)
+
         right_lay.addWidget(btn_w)
         right_lay.addWidget(self._script_panel, 1)
+        right_lay.addWidget(sdo_group)
 
         # ── Splitter ───────────────────────────────────────────────────────────
         splitter = QSplitter(Qt.Horizontal)
@@ -1622,6 +1812,89 @@ class DynoWindow(QMainWindow):
             main_mode    = DS402_MODES[self._main_mode_combo.currentIndex()][1],
             dut_mode     = DS402_MODES[self._dut_mode_combo.currentIndex()][1],
         )
+
+    # ── SDO handlers ──────────────────────────────────────────────────────────
+
+    def _poll_sdo_response(self):
+        data = self._cmd.pop_sdo_response()
+        if data is not None:
+            self._on_sdo_response(data)
+
+    def _sdo_lookup_register(self):
+        """Update reg_info label and auto-set size when index/sub change."""
+        try:
+            idx = int(self._sdo_index.text() or "0", 16)
+            sub = int(self._sdo_sub.text()   or "0", 16)
+        except ValueError:
+            self._sdo_reg_info.setText("")
+            return
+        entry = _REGISTER_MAP.get((idx, sub))
+        if entry:
+            name  = entry.get("Name", "")
+            dtype = entry.get("Data Type", "")
+            self._sdo_reg_info.setText(f"{name}\n[{dtype}]")
+            size_map = {1: 0, 2: 1, 4: 2, 8: 2}
+            combo_idx = size_map.get(_dtype_size(dtype), 2)
+            self._sdo_size.setCurrentIndex(combo_idx)
+        else:
+            self._sdo_reg_info.setText("")
+
+    def _sdo_read(self):
+        drive    = self._sdo_drive.currentText()
+        index    = int(self._sdo_index.text() or "0", 16)
+        subindex = int(self._sdo_sub.text()   or "0", 16)
+        size     = [1, 2, 4][self._sdo_size.currentIndex()]
+        self._sdo_feedback.setPlainText("…waiting…")
+        self._cmd.request_sdo(drive, "read", index, subindex, size)
+
+    def _sdo_write(self):
+        drive    = self._sdo_drive.currentText()
+        index    = int(self._sdo_index.text() or "0", 16)
+        subindex = int(self._sdo_sub.text()   or "0", 16)
+        size     = [1, 2, 4][self._sdo_size.currentIndex()]
+        entry = _REGISTER_MAP.get((index, subindex))
+        dtype = entry.get("Data Type", "") if entry else ""
+        text  = self._sdo_value.text().strip()
+        try:
+            if dtype:
+                raw_uint, size = _encode_sdo_value(text, dtype)
+            else:
+                raw_uint = int(text or "0", 0)
+        except Exception as e:
+            self._sdo_feedback.setPlainText(f"Parse error: {e}")
+            return
+        self._sdo_feedback.setPlainText("…waiting…")
+        self._cmd.request_sdo(drive, "write", index, subindex, size, raw_uint)
+
+    def _on_sdo_response(self, data: dict):
+        if data.get("success"):
+            op      = data.get("op", "?").upper()
+            idx_str = data.get("index", "?")
+            sub_raw = data.get("subindex", 0)
+            raw_val = data.get("value", 0)
+            try:
+                idx_int = int(idx_str.replace("0x", "").replace("0X", ""), 16)
+                sub_int = int(sub_raw) if isinstance(sub_raw, int) else int(str(sub_raw), 0)
+            except Exception:
+                idx_int, sub_int = 0, 0
+            entry = _REGISTER_MAP.get((idx_int, sub_int))
+            dtype = entry.get("Data Type", "") if entry else ""
+            if dtype:
+                val_str = _decode_sdo_value(raw_val, dtype)
+            else:
+                val_str = data.get("value_hex", hex(raw_val))
+            name_line = f"Name:     {entry['Name']}\n" if entry else ""
+            type_line = f"Type:     {dtype}\n"         if dtype  else ""
+            self._sdo_feedback.setPlainText(
+                f"{op} OK\n"
+                f"Index:    {idx_str}\n"
+                f"Sub:      0x{sub_int:02X}\n"
+                f"{name_line}{type_line}"
+                f"Value:    {val_str}"
+            )
+        else:
+            self._sdo_feedback.setPlainText(
+                f"ERROR\n{data.get('error', 'unknown')}")
 
     def _on_limits_updated(self, drive: str) -> None:
         """Called from the ROS spin thread — schedule GUI update on the Qt thread."""

@@ -73,6 +73,7 @@ extern "C" {
 #include <set>
 #include <pthread.h>
 #include <sched.h>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -150,6 +151,30 @@ struct CommandState {
 static std::mutex      g_cmd_mutex;
 static CommandState    g_cmd_state;
 
+// ── SDO request / response (written by ROS2 subscriber, executed by main loop) ─
+
+struct SdoRequest {
+    bool     pending   = false;
+    bool     is_write  = false;
+    int      slave_idx = 0;
+    uint16_t index     = 0;
+    uint8_t  subindex  = 0;
+    int      size      = 4;   // bytes: 1, 2, or 4
+    int64_t  value     = 0;   // used for writes only
+};
+struct SdoResponse {
+    std::string op;
+    uint16_t    index    = 0;
+    uint8_t     subindex = 0;
+    int         size     = 0;
+    bool        success  = false;
+    int64_t     value    = 0;
+    std::string error;
+};
+
+static std::mutex   g_sdo_mutex;
+static SdoRequest   g_sdo_req;
+
 // ── DS402 helpers ─────────────────────────────────────────────────────────────
 
 static const char* cia402Name(Cia402State s) {
@@ -178,6 +203,7 @@ public:
         pub_enc_   = create_publisher<std_msgs::msg::UInt32>("/dyno/encoder/count",       10);
         pub_ch1_t_ = create_publisher<std_msgs::msg::Float64>("/dyno/torque/ch1",         10);
         pub_ch2_t_ = create_publisher<std_msgs::msg::Float64>("/dyno/torque/ch2",         10);
+        pub_sdo_   = create_publisher<std_msgs::msg::String>("/dyno/sdo_response",        10);
 
         // Command subscriber
         sub_cmd_ = create_subscription<std_msgs::msg::String>(
@@ -231,7 +257,56 @@ public:
             }
         );
 
+        // SDO request subscriber — stores request; main loop executes and publishes response.
+        sub_sdo_ = create_subscription<std_msgs::msg::String>(
+            "/dyno/sdo_request", 10,
+            [this](const std_msgs::msg::String::SharedPtr msg) {
+                try {
+                    const json j = json::parse(msg->data);
+                    SdoRequest req;
+                    req.pending   = true;
+                    req.is_write  = (j.value("op", "read") == "write");
+                    const std::string drv = j.value("drive", "main");
+                    req.slave_idx = (drv == "dut") ? dut_soem_idx_ : drive_soem_idx_;
+                    req.index     = static_cast<uint16_t>(
+                                        std::stoul(j.value("index", "0"), nullptr, 16));
+                    req.subindex  = static_cast<uint8_t>(
+                                        std::stoul(j.value("subindex", "0"), nullptr, 16));
+                    req.size      = j.value("size", 4);
+                    req.value     = j.value("value", int64_t{0});
+                    std::lock_guard<std::mutex> lk(g_sdo_mutex);
+                    g_sdo_req = req;
+                } catch (const std::exception& e) {
+                    RCLCPP_WARN(get_logger(), "Bad /dyno/sdo_request: %s", e.what());
+                }
+            }
+        );
+
         RCLCPP_INFO(get_logger(), "DynoBridgeNode ready.");
+    }
+
+    void setSlaveIndices(int drive_idx, int dut_idx) {
+        drive_soem_idx_ = drive_idx;
+        dut_soem_idx_   = dut_idx;
+    }
+
+    void publishSdoResponse(const SdoResponse& resp) {
+        std::ostringstream idx_ss, val_ss;
+        idx_ss << "0x" << std::hex << std::uppercase << std::setw(4)
+               << std::setfill('0') << resp.index;
+        val_ss << "0x" << std::hex << std::uppercase << resp.value;
+        json jr;
+        jr["op"]        = resp.op;
+        jr["index"]     = idx_ss.str();
+        jr["subindex"]  = resp.subindex;
+        jr["size"]      = resp.size;
+        jr["success"]   = resp.success;
+        jr["value"]     = resp.value;
+        jr["value_hex"] = val_ss.str();
+        jr["error"]     = resp.error;
+        std_msgs::msg::String out;
+        out.data = jr.dump();
+        pub_sdo_->publish(out);
     }
 
     void publishTelemetry(
@@ -278,13 +353,17 @@ public:
     }
 
 private:
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  pub_main_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  pub_dut_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  pub_stats_;
-    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr  pub_enc_;
-    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_ch1_t_;
-    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_ch2_t_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_main_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_dut_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_stats_;
+    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr   pub_enc_;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr  pub_ch1_t_;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr  pub_ch2_t_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_sdo_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_cmd_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_sdo_;
+    int drive_soem_idx_ = 1;
+    int dut_soem_idx_   = 2;
 };
 
 // ── PDO logging helpers ────────────────────────────────────────────────────────
@@ -452,6 +531,8 @@ int main(int argc, char** argv) {
         "[init] SOEM indices — %s=%d  %s=%d",
         drive_slave.c_str(), drive_soem_idx,
         dut_slave.c_str(), dut_soem_idx);
+
+    node->setSlaveIndices(drive_soem_idx, dut_soem_idx);
 
     // Extract startup gains for both drives from SDO reads done during init.
     struct DriveGains {
@@ -792,6 +873,51 @@ int main(int argc, char** argv) {
             g_rotate_log.store(true);
             std::lock_guard<std::mutex> lk(g_cmd_mutex);
             g_cmd_state.save_log = false;
+        }
+
+        // SDO read/write — mailbox channel is separate from PDO, safe in main thread.
+        {
+            SdoRequest req;
+            {
+                std::lock_guard<std::mutex> lk(g_sdo_mutex);
+                if (g_sdo_req.pending) {
+                    req = g_sdo_req;
+                    g_sdo_req.pending = false;
+                }
+            }
+            if (req.pending) {
+                SdoResponse resp;
+                resp.op       = req.is_write ? "write" : "read";
+                resp.index    = req.index;
+                resp.subindex = req.subindex;
+                resp.size     = req.size;
+                uint8_t buf[8] = {};
+                if (req.is_write) {
+                    std::memcpy(buf, &req.value, static_cast<size_t>(req.size));
+                    int rc = ec_SDOwrite(static_cast<uint16_t>(req.slave_idx),
+                                        req.index, req.subindex,
+                                        FALSE, req.size, buf, EC_TIMEOUTRXM);
+                    resp.success = (rc > 0);
+                    resp.value   = req.value;
+                    if (!resp.success)
+                        resp.error = "ec_SDOwrite failed (rc=" + std::to_string(rc) + ")";
+                } else {
+                    int sz = req.size;
+                    int rc = ec_SDOread(static_cast<uint16_t>(req.slave_idx),
+                                       req.index, req.subindex,
+                                       FALSE, &sz, buf, EC_TIMEOUTRXM);
+                    resp.success = (rc > 0);
+                    resp.size    = sz;
+                    if (resp.success) {
+                        int64_t v = 0;
+                        std::memcpy(&v, buf, static_cast<size_t>(sz));
+                        resp.value = v;
+                    } else {
+                        resp.error = "ec_SDOread failed (rc=" + std::to_string(rc) + ")";
+                    }
+                }
+                node->publishSdoResponse(resp);
+            }
         }
 
         // Apply torque sensor ADC scale to the adapter.

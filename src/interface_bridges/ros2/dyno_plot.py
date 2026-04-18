@@ -62,6 +62,8 @@ JSON_TOPICS  = [
     "/dyno/dut/status",
     "/dyno/loop/stats",
     "/dyno/command",
+    "/dyno/sdo_request",
+    "/dyno/sdo_response",
 ]
 FLOAT_TOPICS = [
     "/dyno/torque/ch1",
