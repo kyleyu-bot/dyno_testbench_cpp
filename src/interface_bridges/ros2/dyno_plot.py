@@ -28,7 +28,7 @@ try:
         QVBoxLayout, QHBoxLayout, QGridLayout,
         QSplitter, QLabel, QSpinBox, QPushButton,
         QTreeWidget, QTreeWidgetItem, QSizePolicy,
-        QMenu, QAction,
+        QMenu, QAction, QFrame, QScrollArea,
     )
 except ImportError:
     print("ERROR: PyQt5 not found.  pip install PyQt5", file=sys.stderr)
@@ -62,6 +62,8 @@ JSON_TOPICS  = [
     "/dyno/dut/status",
     "/dyno/loop/stats",
     "/dyno/command",
+    "/dyno/sdo_request",
+    "/dyno/sdo_response",
 ]
 FLOAT_TOPICS = [
     "/dyno/torque/ch1",
@@ -181,7 +183,7 @@ class DynoPlotNode(Node):
                 pass
 
     def _on_float(self, msg: Float64, topic: str) -> None:
-        self._store.push(topic, "value", time.monotonic(), msg.data)
+        self._store.push(topic, "torque_nm", time.monotonic(), msg.data)
 
     def _on_uint(self, msg: UInt32, topic: str) -> None:
         self._store.push(topic, "value", time.monotonic(), float(msg.data))
@@ -380,6 +382,149 @@ class PlotGrid(QWidget):
                 cell.update_curves(window_s)
 
 
+# ── DisplayBox ─────────────────────────────────────────────────────────────────
+
+class DisplayBox(QFrame):
+    """Drop-target cell showing the live current / min / max of a (topic, field) pair."""
+
+    def __init__(self, store: DataStore, parent=None):
+        super().__init__(parent)
+        self._store: DataStore    = store
+        self._topic: "str | None" = None
+        self._field: "str | None" = None
+
+        self.setAcceptDrops(True)
+        self.setFrameShape(QFrame.Box)
+        self.setLineWidth(1)
+        self.setStyleSheet(
+            "DisplayBox { background: #1a1a2e; border: 1px solid #444; }")
+        self.setMinimumHeight(80)
+
+        vlay = QVBoxLayout(self)
+        vlay.setContentsMargins(6, 4, 6, 4)
+        vlay.setSpacing(2)
+
+        self._lbl_name = QLabel("— drop field —")
+        self._lbl_name.setAlignment(Qt.AlignCenter)
+        self._lbl_name.setStyleSheet("color: #888; font-size: 13px;")
+
+        self._lbl_value = QLabel("")
+        self._lbl_value.setAlignment(Qt.AlignCenter)
+        self._lbl_value.setStyleSheet(
+            "color: #2ecc71; font-size: 26px; font-family: monospace; font-weight: bold;")
+
+        self._lbl_stats = QLabel("")
+        self._lbl_stats.setAlignment(Qt.AlignCenter)
+        self._lbl_stats.setStyleSheet("color: #888; font-size: 12px;")
+
+        vlay.addWidget(self._lbl_name)
+        vlay.addWidget(self._lbl_value)
+        vlay.addWidget(self._lbl_stats)
+
+    # ── live update ────────────────────────────────────────────────────────────
+
+    def update(self, window_s: float) -> None:
+        if self._topic is None:
+            return
+        _, vs = self._store.get(self._topic, self._field, window_s)
+        if len(vs) == 0:
+            return
+        self._lbl_value.setText(f"{vs[-1]:.6g}")
+        self._lbl_stats.setText(f"min {vs.min():.6g}   max {vs.max():.6g}")
+
+    # ── internal ───────────────────────────────────────────────────────────────
+
+    def _set_field(self, topic: str, field: str) -> None:
+        self._topic = topic
+        self._field = field
+        self._lbl_name.setText(f"{topic.split('/')[-1]}.{field}")
+        self._lbl_name.setStyleSheet("color: #ecf0f1; font-size: 13px;")
+        self._lbl_value.setText("")
+        self._lbl_stats.setText("")
+
+    def _clear(self) -> None:
+        self._topic = None
+        self._field = None
+        self._lbl_name.setText("— drop field —")
+        self._lbl_name.setStyleSheet("color: #888; font-size: 13px;")
+        self._lbl_value.setText("")
+        self._lbl_stats.setText("")
+
+    # ── drag / drop ────────────────────────────────────────────────────────────
+
+    def dragEnterEvent(self, ev):
+        if ev.mimeData().hasFormat(MIME_TYPE):
+            ev.acceptProposedAction()
+        else:
+            ev.ignore()
+
+    def dragMoveEvent(self, ev):
+        ev.acceptProposedAction()
+
+    def dropEvent(self, ev):
+        raw = bytes(ev.mimeData().data(MIME_TYPE)).decode()
+        if "::" not in raw:
+            ev.ignore()
+            return
+        topic, field = raw.split("::", 1)
+        self._set_field(topic, field)
+        ev.acceptProposedAction()
+
+    def contextMenuEvent(self, ev):
+        menu = QMenu(self)
+        if self._topic:
+            label = f"{self._topic.split('/')[-1]}.{self._field}"
+            menu.addAction(f"Clear: {label}", self._clear)
+        else:
+            menu.addAction("(empty)", lambda: None).setEnabled(False)
+        menu.exec_(ev.globalPos())
+
+
+# ── DisplayPanel ───────────────────────────────────────────────────────────────
+
+class DisplayPanel(QWidget):
+    """Scrollable column of live DisplayBox widgets."""
+
+    def __init__(self, store: DataStore, parent=None):
+        super().__init__(parent)
+        self._store  = store
+        self._boxes: list[DisplayBox] = []
+
+        self._inner = QWidget()
+        self._vlay  = QVBoxLayout(self._inner)
+        self._vlay.setSpacing(4)
+        self._vlay.setContentsMargins(4, 4, 4, 4)
+        self._vlay.addStretch(1)   # sentinel — always at the end
+
+        scroll = QScrollArea()
+        scroll.setWidget(self._inner)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+        self._set_count(4)
+
+    def set_count(self, n: int) -> None:
+        self._set_count(n)
+
+    def update(self, window_s: float) -> None:
+        for box in self._boxes:
+            box.update(window_s)
+
+    def _set_count(self, n: int) -> None:
+        while len(self._boxes) > n:
+            box = self._boxes.pop()
+            self._vlay.removeWidget(box)
+            box.deleteLater()
+        while len(self._boxes) < n:
+            box = DisplayBox(self._store, self._inner)
+            self._vlay.insertWidget(len(self._boxes), box)
+            self._boxes.append(box)
+
+
 # ── DynoPlotWindow ─────────────────────────────────────────────────────────────
 
 class DynoPlotWindow(QMainWindow):
@@ -420,6 +565,10 @@ class DynoPlotWindow(QMainWindow):
 
         ctrl_lay.addWidget(_vline())
 
+        self._displays_spin = labelled_spin("Displays:", 0, 20, 4)
+
+        ctrl_lay.addWidget(_vline())
+
         self._min_spin     = labelled_spin("Min (s):",    1,  600,  DEFAULT_MIN,
                                            "Minimum history window")
         self._win_spin     = labelled_spin("Window (s):", 1,  600,  DEFAULT_WIN,
@@ -436,12 +585,18 @@ class DynoPlotWindow(QMainWindow):
 
         self._grid = PlotGrid(store, rows=2, cols=2)
 
+        self._display_panel = DisplayPanel(store)
+        self._display_panel.setMinimumWidth(160)
+        self._display_panel.setMaximumWidth(280)
+
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._browser)
         splitter.addWidget(self._grid)
+        splitter.addWidget(self._display_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([220, 1060])
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([220, 840, 220])
 
         # ── Layout ─────────────────────────────────────────────────────────────
         central  = QWidget()
@@ -455,6 +610,7 @@ class DynoPlotWindow(QMainWindow):
         # ── Connections ────────────────────────────────────────────────────────
         self._rows_spin.valueChanged.connect(self._on_dims_changed)
         self._cols_spin.valueChanged.connect(self._on_dims_changed)
+        self._displays_spin.valueChanged.connect(self._on_display_count_changed)
         self._min_spin.valueChanged.connect(self._on_limits_changed)
         self._max_spin.valueChanged.connect(self._on_limits_changed)
         self._win_spin.valueChanged.connect(self._clamp_window)
@@ -475,6 +631,9 @@ class DynoPlotWindow(QMainWindow):
 
     def _on_dims_changed(self) -> None:
         self._grid.set_dims(self._rows_spin.value(), self._cols_spin.value())
+
+    def _on_display_count_changed(self) -> None:
+        self._display_panel.set_count(self._displays_spin.value())
 
     def _on_limits_changed(self) -> None:
         lo = self._min_spin.value()
@@ -498,7 +657,9 @@ class DynoPlotWindow(QMainWindow):
         self._win_spin.blockSignals(False)
 
     def _update_plots(self) -> None:
-        self._grid.update_all(float(self._win_spin.value()))
+        window_s = float(self._win_spin.value())
+        self._grid.update_all(window_s)
+        self._display_panel.update(window_s)
 
     def _refresh_browser(self) -> None:
         self._browser.refresh(self._store.known_fields())

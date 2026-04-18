@@ -29,6 +29,7 @@ import inspect
 import json
 import os
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -37,15 +38,15 @@ import traceback
 
 # ── Qt ────────────────────────────────────────────────────────────────────────
 try:
-    from PyQt5.QtCore    import Qt, QTimer, QMimeData, QByteArray
-    from PyQt5.QtGui     import QFont
+    from PyQt5.QtCore    import Qt, QTimer, QMimeData, QByteArray, QRegularExpression
+    from PyQt5.QtGui     import QFont, QRegularExpressionValidator
     from PyQt5.QtWidgets import (
         QApplication, QMainWindow, QWidget,
         QVBoxLayout, QHBoxLayout, QSplitter,
         QSlider, QPushButton, QLabel, QGroupBox,
         QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem,
         QMenu, QAction, QComboBox, QTextEdit, QFormLayout,
-        QScrollArea, QSizePolicy,
+        QScrollArea, QSizePolicy, QLineEdit,
     )
 except ImportError:
     print("ERROR: PyQt5 not found.  pip install PyQt5", file=sys.stderr)
@@ -55,7 +56,7 @@ except ImportError:
 try:
     import rclpy
     from rclpy.node   import Node
-    from std_msgs.msg import String as StringMsg
+    from std_msgs.msg import String as StringMsg, Float64 as Float64Msg
 except ImportError:
     print("ERROR: rclpy not found.  source /opt/ros/humble/setup.bash", file=sys.stderr)
     sys.exit(1)
@@ -63,14 +64,127 @@ except ImportError:
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 DEFAULT_BRIDGE      = "build/dyno_ros2_bridge/bridge_ros2"
-DEFAULT_TOPOLOGY    = "config/topology.dyno2.template6.json"
+DEFAULT_TOPOLOGY    = "config/ethercat_device_config/topology.dyno2.template6.json"
 DEFAULT_PUB_HZ      = 200.0
 TEST_SCRIPTS_DIR    = "src/dyno_test_scripts"  # scanned for *.py test scripts
 DEFAULT_FAULT_S  = 2.0
 
 CMD_MIME  = "application/x-dyno-command-field"
-NUM_SLOTS = 9   # number of slider slots shown
+NUM_SLOTS      = 9   # number of slider slots shown
+NUM_SPIN_SLOTS  = 6   # spinbox slots per row
+NUM_SPIN_ROWS   = 2   # number of spinbox rows below sliders
+SDO_TIMEOUT_S   = 3.0 # seconds before an SDO request is declared timed out
 
+# ── Novanta error code lookup ─────────────────────────────────────────────────
+
+_ERROR_MAP_PATH = "config/novanta_error_code_mapping/error_mapping_sectioned.json"
+
+def _load_error_map(path: str) -> dict:
+    """Load all sections of the Novanta error code JSON into a flat int→str dict."""
+    try:
+        with open(path) as f:
+            raw = json.load(f)
+    except Exception:
+        return {}
+    result = {}
+    for section in raw.values():
+        for hex_str, desc in section.items():
+            try:
+                result[int(hex_str, 16)] = desc
+            except ValueError:
+                pass
+    return result
+
+_ERROR_MAP: dict = _load_error_map(_ERROR_MAP_PATH)
+
+def _lookup_error(code: int) -> str:
+    """Return a display string for a DS402 error code. Empty string when code is 0."""
+    if code == 0:
+        return ""
+    desc = _ERROR_MAP.get(code)
+    if desc:
+        return f"0x{code:08X} — {desc}"
+    return f"0x{code:08X} — Unknown error"
+
+# ── Novanta register map ──────────────────────────────────────────────────────
+
+_REGISTER_MAP_PATH = "config/novanta_register_list/novanta_ethercat_registers_list.json"
+
+def _load_register_map(path: str) -> dict:
+    """Load register list into {(index_int, subindex_int): entry} dict."""
+    try:
+        with open(path) as f:
+            entries = json.load(f)
+    except Exception:
+        return {}
+    result = {}
+    for e in entries:
+        try:
+            idx = int(e["Index"], 16)
+            sub = int(e["Sub Index"], 16)
+            result[(idx, sub)] = e
+        except Exception:
+            pass
+    return result
+
+_REGISTER_MAP: dict = _load_register_map(_REGISTER_MAP_PATH)
+
+def _dtype_size(dtype: str) -> int:
+    """Return byte size for a register Data Type string."""
+    dt = dtype.upper()
+    if dt in ("INT8", "UINT8"):
+        return 1
+    if dt in ("INT16", "UINT16"):
+        return 2
+    if dt in ("INT32", "UINT32", "FLOAT", "FLOAT32"):
+        return 4
+    if dt in ("UINT64",):
+        return 8
+    return 4  # default
+
+def _decode_sdo_value(raw_int: int, dtype: str) -> str:
+    """Format a raw integer value read from SDO according to its data type."""
+    dt = dtype.upper()
+    size = _dtype_size(dtype)
+    if dt in ("FLOAT", "FLOAT32"):
+        raw_bytes = raw_int.to_bytes(4, "little", signed=False)
+        (f,) = struct.unpack("<f", raw_bytes)
+        return f"{f:.6g}"
+    if dt in ("INT8", "INT16", "INT32"):
+        signed_map = {1: "<b", 2: "<h", 4: "<i"}
+        raw_bytes = raw_int.to_bytes(size, "little", signed=False)
+        (v,) = struct.unpack(signed_map[size], raw_bytes)
+        return f"{v}  (0x{raw_int:0{size*2}X})"
+    # unsigned int / other
+    return f"{raw_int}  (0x{raw_int:0{size*2}X})"
+
+def _encode_sdo_value(text: str, dtype: str) -> tuple:
+    """
+    Parse user-entered text as the given data type and return (raw_uint, size).
+    raw_uint is the integer whose bytes will be written via SDO.
+    """
+    dt = dtype.upper()
+    size = _dtype_size(dtype)
+    text = text.strip()
+    if not text:
+        return 0, size
+    if dt in ("FLOAT", "FLOAT32"):
+        f = float(text)
+        raw_bytes = struct.pack("<f", f)
+        raw_uint = int.from_bytes(raw_bytes, "little")
+        return raw_uint, 4
+    if dt in ("INT8", "INT16", "INT32"):
+        signed_map = {1: "<b", 2: "<h", 4: "<i"}
+        # accept decimal or hex
+        v = int(text, 0)
+        raw_bytes = struct.pack(signed_map[size], v)
+        raw_uint = int.from_bytes(raw_bytes, "little")
+        return raw_uint, size
+    # unsigned / default
+    v = int(text, 0)
+    return v, size
+
+# ── All drag-assignable command fields ────────────────────────────────────────
 # All drag-assignable command fields: (json_key, display_label)
 COMMAND_FIELDS = [
     ("main_velocity",   "Main Velocity"),
@@ -123,6 +237,9 @@ DS402_MODES = [
     ("Cyclic Sync Torque (10)",     10),
 ]
 DS402_DEFAULT_MODE = 9   # Cyclic Sync Velocity
+
+# Allowed torque sensor scale values — must match El3002Adapter::ALLOWED_TORQUE_SCALES
+TORQUE_SCALE_OPTIONS = [20, 200, 500]   # Nm
 
 MAIN_ZERO_FIELDS = ["main_velocity", "main_position", "main_torque", "main_current"]
 DUT_ZERO_FIELDS  = ["dut_velocity",  "dut_position",  "dut_torque",  "dut_current"]
@@ -291,10 +408,13 @@ class DynoCommander(Node):
         # payload when a slider is explicitly assigned to them, so the bridge
         # keeps its SDO-seeded values by default.
         self._numeric      = {k: 0 for k in ALL_CMD_KEYS if k not in GAIN_FIELDS}
-        self._main_enable  = False
-        self._dut_enable   = False
-        self._fault_reset  = False
-        self._hold_output1 = False
+        self._main_enable       = False
+        self._dut_enable        = False
+        self._fault_reset       = False
+        self._hold_output1      = False
+        self._zero_torque_ch1   = False
+        self._zero_torque_ch2   = False
+        self._save_log          = False
         self._main_mode    = DS402_DEFAULT_MODE
         self._dut_mode     = DS402_DEFAULT_MODE
 
@@ -308,15 +428,39 @@ class DynoCommander(Node):
         self._limits_lock     = threading.Lock()
         self._main_limits     = dict(_empty_limits)
         self._dut_limits      = dict(_empty_limits)
+        self._main_error_code: int = 0
+        self._dut_error_code:  int = 0
         self._limits_callback = None   # callable(drive: str), set by DynoWindow
+
+        # Torque sensor readings — updated from /dyno/torque/{ch1,ch2}.
+        # Scales are mirrored from set_command() so scripts can query them.
+        self._ch1_torque_nm: float = 0.0
+        self._ch2_torque_nm: float = 0.0
+        self._ch1_scale_nm:  float = 200.0   # default, matches El3002Adapter ch1
+        self._ch2_scale_nm:  float = 20.0    # default, matches El3002Adapter ch2
 
         self.create_subscription(StringMsg, "/dyno/main_drive/status",
             lambda msg: self._on_status(msg, "main"), 10)
         self.create_subscription(StringMsg, "/dyno/dut/status",
             lambda msg: self._on_status(msg, "dut"), 10)
+        self.create_subscription(Float64Msg, "/dyno/torque/ch1",
+            lambda msg: self._on_torque(msg, "ch1"), 10)
+        self.create_subscription(Float64Msg, "/dyno/torque/ch2",
+            lambda msg: self._on_torque(msg, "ch2"), 10)
 
-        period = 1.0 / max(pub_hz, 1.0)
-        self.create_timer(period, self._publish)
+        # SDO request/response
+        self._sdo_pub = self.create_publisher(StringMsg, "/dyno/sdo_request", 10)
+        self._pending_sdo_response = None   # written by ROS thread, read by Qt timer
+        self.create_subscription(StringMsg, "/dyno/sdo_response",
+            self._on_sdo_response, 10)
+
+        self._pub_period_s = 1.0 / max(pub_hz, 1.0)
+        self.create_timer(self._pub_period_s, self._publish)
+
+    @property
+    def pub_period_s(self) -> float:
+        """Publish period in seconds (1 / pub_hz). Scripts use this as their loop dt."""
+        return self._pub_period_s
 
     def set_command(self, numeric: dict,
                     main_enable: bool, dut_enable: bool,
@@ -331,6 +475,12 @@ class DynoCommander(Node):
             self._hold_output1 = hold_output1
             self._main_mode    = main_mode
             self._dut_mode     = dut_mode
+        # Mirror torque scales so scripts can read them back via get_torque_scale().
+        with self._limits_lock:
+            if "ch1_torque_scale" in numeric:
+                self._ch1_scale_nm = float(numeric["ch1_torque_scale"])
+            if "ch2_torque_scale" in numeric:
+                self._ch2_scale_nm = float(numeric["ch2_torque_scale"])
 
     def _on_status(self, msg: StringMsg, drive: str) -> None:
         try:
@@ -355,13 +505,37 @@ class DynoCommander(Node):
             "pos_ki":     float(data.get("pos_ki",     0.0)),
             "pos_kd":     float(data.get("pos_kd",     0.0)),
         }
+        error_code = int(data.get("err", 0))
         with self._limits_lock:
             if drive == "main":
-                self._main_limits = limits
+                self._main_limits     = limits
+                self._main_error_code = error_code
             else:
-                self._dut_limits = limits
+                self._dut_limits      = limits
+                self._dut_error_code  = error_code
         if self._limits_callback:
             self._limits_callback(drive)
+
+    def get_error_code(self, drive: str) -> int:
+        with self._limits_lock:
+            return self._main_error_code if drive == "main" else self._dut_error_code
+
+    def _on_torque(self, msg: Float64Msg, channel: str) -> None:
+        with self._limits_lock:
+            if channel == "ch1":
+                self._ch1_torque_nm = msg.data
+            else:
+                self._ch2_torque_nm = msg.data
+
+    def get_torque(self, channel: str) -> float:
+        """Return the latest torque reading for 'ch1' or 'ch2' (Nm)."""
+        with self._limits_lock:
+            return self._ch1_torque_nm if channel == "ch1" else self._ch2_torque_nm
+
+    def get_torque_scale(self, channel: str) -> float:
+        """Return the current full-scale range (Nm) for 'ch1' or 'ch2'."""
+        with self._limits_lock:
+            return self._ch1_scale_nm if channel == "ch1" else self._ch2_scale_nm
 
     def set_limits_callback(self, cb) -> None:
         self._limits_callback = cb
@@ -410,16 +584,65 @@ class DynoCommander(Node):
         with self._lock:
             self._fault_reset = True
 
+    def pulse_torque_zero_ch1(self):
+        """Send zero_torque_ch1=true for one publish cycle."""
+        with self._lock:
+            self._zero_torque_ch1 = True
+
+    def pulse_torque_zero_ch2(self):
+        """Send zero_torque_ch2=true for one publish cycle."""
+        with self._lock:
+            self._zero_torque_ch2 = True
+
+    def pulse_save_log(self):
+        """Send save_log=true for one publish cycle, triggering log rotation in the bridge."""
+        with self._lock:
+            self._save_log = True
+
+    def request_sdo(self, drive: str, op: str,
+                    index: int, subindex: int, size: int, value: int = 0) -> None:
+        payload = {
+            "drive":    drive,
+            "op":       op,
+            "index":    f"{index:04X}",
+            "subindex": f"{subindex:02X}",
+            "size":     size,
+            "value":    value,
+        }
+        msg      = StringMsg()
+        msg.data = json.dumps(payload)
+        self._sdo_pub.publish(msg)
+
+    def _on_sdo_response(self, msg: StringMsg) -> None:
+        try:
+            data = json.loads(msg.data)
+        except Exception:
+            return
+        with self._limits_lock:
+            self._pending_sdo_response = data
+
+    def pop_sdo_response(self):
+        with self._limits_lock:
+            data = self._pending_sdo_response
+            self._pending_sdo_response = None
+            return data
+
     def _publish(self):
         with self._lock:
             payload = dict(self._numeric)
-            payload["main_enable"]  = self._main_enable
-            payload["dut_enable"]   = self._dut_enable
-            payload["fault_reset"]  = self._fault_reset
-            payload["hold_output1"] = self._hold_output1
-            payload["main_mode"]    = self._main_mode
-            payload["dut_mode"]     = self._dut_mode
-            self._fault_reset = False   # one-shot pulse
+            payload["main_enable"]       = self._main_enable
+            payload["dut_enable"]        = self._dut_enable
+            payload["fault_reset"]       = self._fault_reset
+            payload["hold_output1"]      = self._hold_output1
+            payload["main_mode"]         = self._main_mode
+            payload["dut_mode"]          = self._dut_mode
+            payload["zero_torque_ch1"]   = self._zero_torque_ch1
+            payload["zero_torque_ch2"]   = self._zero_torque_ch2
+            payload["save_log"]          = self._save_log
+            self._fault_reset          = False   # one-shot pulses
+            self._zero_torque_ch1      = False
+            self._zero_torque_ch2      = False
+            self._save_log             = False
 
         msg      = StringMsg()
         msg.data = json.dumps(payload)
@@ -483,6 +706,7 @@ class SliderSlot(QGroupBox):
 
         # Max spinbox
         self._max_spin = QSpinBox()
+        self._max_spin.setKeyboardTracking(False)
         self._max_spin.setRange(_SPIN_LO, _SPIN_HI)
         self._max_spin.setValue(1000)
         self._max_spin.setPrefix("Max: ")
@@ -497,22 +721,26 @@ class SliderSlot(QGroupBox):
 
         # Min spinbox
         self._min_spin = QSpinBox()
+        self._min_spin.setKeyboardTracking(False)
         self._min_spin.setRange(_SPIN_LO, _SPIN_HI)
         self._min_spin.setValue(-1000)
         self._min_spin.setPrefix("Min: ")
 
         # Exact entry spinbox (integer mode)
         self._exact_spin = QSpinBox()
+        self._exact_spin.setKeyboardTracking(False)
         self._exact_spin.setRange(-1000, 1000)
         self._exact_spin.setValue(0)
 
         # Float spinbox (gain mode — replaces slider+exact_spin)
         self._float_spin = QDoubleSpinBox()
+        self._float_spin.setKeyboardTracking(False)
         self._float_spin.setRange(0.0, 20.0)
         self._float_spin.setSingleStep(0.001)
         self._float_spin.setDecimals(3)
         self._float_spin.setValue(0.0)
         self._float_spin.hide()
+        self._committed_float: float = 0.0
 
         # Value display
         self._val_label = QLabel("0")
@@ -574,6 +802,7 @@ class SliderSlot(QGroupBox):
         self._val_label.setText(str(v))
 
     def _on_float_changed(self, v: float):
+        self._committed_float = v
         self._val_label.setText(f"{v:.3f}")
 
     # ── float mode ────────────────────────────────────────────────────────────
@@ -588,6 +817,7 @@ class SliderSlot(QGroupBox):
         self._float_spin.blockSignals(True)
         self._float_spin.setRange(lo, hi)
         self._float_spin.setValue(default)
+        self._committed_float = default
         self._float_spin.blockSignals(False)
         self._val_label.setText(f"{default:.3f}")
         self._float_spin.show()
@@ -699,12 +929,13 @@ class SliderSlot(QGroupBox):
     def value(self):
         """Return float if in gain mode, int otherwise."""
         if self._float_mode:
-            return self._float_spin.value()
+            return self._committed_float
         return self._slider.value()
 
     def zero(self):
         if self._float_mode:
             self._float_spin.setValue(0.0)
+            self._committed_float = 0.0
         else:
             self._slider.setValue(0)
 
@@ -729,6 +960,145 @@ class SliderSlot(QGroupBox):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Spinbox slot (drop target)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SpinboxSlot(QGroupBox):
+    """
+    A single labelled QDoubleSpinBox drop target.
+    Drop a command field from CommandFieldList to assign what it controls.
+    Right-click to unassign.
+    Values apply on Enter / focus-out (keyboardTracking=False + _committed).
+    """
+
+    _PLACEHOLDER = "— drop field —"
+
+    def __init__(self, on_drop=None, is_field_allowed=None,
+                 on_assigned=None, on_unassigned=None, parent=None):
+        super().__init__(SpinboxSlot._PLACEHOLDER, parent)
+        self._field: str | None = None
+        self._on_drop          = on_drop
+        self._is_field_allowed = is_field_allowed
+        self._on_assigned      = on_assigned
+        self._on_unassigned    = on_unassigned
+        self._committed: float = 0.0
+        self.setAcceptDrops(True)
+        self.setMinimumWidth(90)
+
+        self._spin = QDoubleSpinBox()
+        self._spin.setRange(-1e9, 1e9)
+        self._spin.setDecimals(3)
+        self._spin.setSingleStep(1.0)
+        self._spin.setValue(0.0)
+        self._spin.setKeyboardTracking(False)
+        self._spin.setEnabled(False)
+
+        self._clear_btn = QPushButton("Clear")
+        self._clear_btn.setEnabled(False)
+        self._clear_btn.clicked.connect(self._unassign)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(self._spin)
+        lay.addWidget(self._clear_btn)
+
+        self._spin.valueChanged.connect(self._on_value_changed)
+
+    def _on_value_changed(self, v: float):
+        self._committed = v
+
+    # ── drag / drop ───────────────────────────────────────────────────────────
+
+    def dragEnterEvent(self, ev):
+        if ev.mimeData().hasFormat(CMD_MIME):
+            key = bytes(ev.mimeData().data(CMD_MIME)).decode()
+            if key != self._field and self._is_field_allowed and \
+                    not self._is_field_allowed(key):
+                ev.ignore()
+                return
+            ev.acceptProposedAction()
+        else:
+            ev.ignore()
+
+    def dragMoveEvent(self, ev):
+        ev.acceptProposedAction()
+
+    def dropEvent(self, ev):
+        key = bytes(ev.mimeData().data(CMD_MIME)).decode()
+        self._assign(key)
+        if self._on_drop:
+            result = self._on_drop(key)
+            if result is not None:
+                lo, hi, default = result
+                is_gain = key in GAIN_FIELDS
+                self._spin.blockSignals(True)
+                self._spin.setDecimals(3 if is_gain else 1)
+                self._spin.setSingleStep(0.001 if is_gain else 1.0)
+                self._spin.setRange(lo, hi)
+                self._spin.setValue(float(default))
+                self._committed = float(default)
+                self._spin.blockSignals(False)
+        ev.acceptProposedAction()
+
+    def contextMenuEvent(self, ev):
+        if self._field is None:
+            return
+        menu = QMenu(self)
+        act  = QAction("Unassign", self)
+        act.triggered.connect(self._unassign)
+        menu.addAction(act)
+        menu.exec_(ev.globalPos())
+
+    # ── assignment ────────────────────────────────────────────────────────────
+
+    def _assign(self, key: str):
+        if self._field == key:
+            return
+        if self._field is not None and self._on_unassigned:
+            self._on_unassigned(self._field)
+        self._field = key
+        label = next((l for k, l in COMMAND_FIELDS if k == key), key)
+        self.setTitle(label)
+        self._spin.setEnabled(True)
+        self._clear_btn.setEnabled(True)
+        if self._on_assigned:
+            self._on_assigned(key)
+
+    def _unassign(self):
+        old = self._field
+        self._field = None
+        self.setTitle(SpinboxSlot._PLACEHOLDER)
+        self._spin.blockSignals(True)
+        self._spin.setValue(0.0)
+        self._committed = 0.0
+        self._spin.blockSignals(False)
+        self._spin.setEnabled(False)
+        self._clear_btn.setEnabled(False)
+        if old is not None and self._on_unassigned:
+            self._on_unassigned(old)
+
+    # ── public API ────────────────────────────────────────────────────────────
+
+    @property
+    def field(self) -> str | None:
+        return self._field
+
+    @property
+    def value(self) -> float:
+        return self._committed
+
+    def zero(self):
+        self._spin.blockSignals(True)
+        self._spin.setValue(0.0)
+        self._committed = 0.0
+        self._spin.blockSignals(False)
+
+    def apply_limits(self, lo: float, hi: float):
+        self._spin.blockSignals(True)
+        self._spin.setRange(lo, hi)
+        self._spin.blockSignals(False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Scripting panel
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -748,7 +1118,7 @@ class ScriptingPanel(QGroupBox):
         self._commander        = commander
         self._scripts_dir      = scripts_dir
         self._runner           = ScriptRunner()
-        self._param_widgets: dict[str, QDoubleSpinBox | QSpinBox] = {}
+        self._param_widgets: dict[str, QDoubleSpinBox | QSpinBox | QComboBox] = {}
         self._current_mod      = None
         self._on_script_active = on_script_active  # callable(bool) | None
         self._get_modes        = get_modes          # callable() → (main_mode, dut_mode) | None
@@ -882,19 +1252,31 @@ class ScriptingPanel(QGroupBox):
         for name, default in params.items():
             if isinstance(default, float):
                 w = QDoubleSpinBox()
+                w.setKeyboardTracking(False)
                 w.setDecimals(4)
                 w.setRange(-1e9, 1e9)
                 w.setSingleStep(0.1)
                 w.setValue(default)
+            elif isinstance(default, list):
+                w = QComboBox()
+                for item in default:
+                    w.addItem(str(item))
             else:
                 w = QSpinBox()
+                w.setKeyboardTracking(False)
                 w.setRange(-2**30, 2**30 - 1)
                 w.setValue(int(default))
             self._param_widgets[name] = w
             self._params_form.addRow(name + ":", w)
 
     def _collect_params(self) -> dict:
-        return {name: w.value() for name, w in self._param_widgets.items()}
+        result = {}
+        for name, w in self._param_widgets.items():
+            if isinstance(w, QComboBox):
+                result[name] = w.currentText()
+            else:
+                result[name] = w.value()
+        return result
 
     # ── Run / abort ───────────────────────────────────────────────────────────
 
@@ -1006,14 +1388,27 @@ class DynoWindow(QMainWindow):
         self._dut_enabled    = False
         self._hold_output1   = False
         self._script_running = False
+        self._ch1_scale: int = 200   # Nm — matches El3002Adapter ch1 default
+        self._ch2_scale: int = 20    # Nm — matches El3002Adapter ch2 default
 
         self.setWindowTitle("Dyno Control")
         self._build_ui()
         commander.set_limits_callback(self._on_limits_updated)
 
+        self._fault_hist_state: dict | None = None  # active fault-history read state
+        self._sdo_pending_time: float | None = None  # monotonic time of last SDO request
+
+        self._sdo_poll_timer = QTimer(self)
+        self._sdo_poll_timer.timeout.connect(self._poll_sdo_response)
+        self._sdo_poll_timer.start(50)   # 20 Hz
+
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._push_command)
         self._timer.start(5)   # 200 Hz
+
+        self._error_timer = QTimer(self)
+        self._error_timer.timeout.connect(self._refresh_all_errors)
+        self._error_timer.start(500)   # 2 Hz
 
     def _build_ui(self):
         # ── Left: command field list ───────────────────────────────────────────
@@ -1036,6 +1431,30 @@ class DynoWindow(QMainWindow):
         for slot in self._slots:
             slots_lay.addWidget(slot)
 
+        # ── Spinbox rows (below sliders, full-width) ──────────────────────────
+        self._spin_slots = [
+            SpinboxSlot(
+                on_drop          = self._cmd.get_limits,
+                is_field_allowed = lambda key: key not in self._assigned_fields,
+                on_assigned      = lambda key: self._assigned_fields.add(key),
+                on_unassigned    = lambda key: self._assigned_fields.discard(key),
+            )
+            for _ in range(NUM_SPIN_SLOTS * NUM_SPIN_ROWS)
+        ]
+        spin_area     = QWidget()
+        spin_area_lay = QVBoxLayout(spin_area)
+        spin_area_lay.setContentsMargins(0, 0, 0, 0)
+        spin_area_lay.setSpacing(4)
+        for row in range(NUM_SPIN_ROWS):
+            row_w   = QWidget()
+            row_lay = QHBoxLayout(row_w)
+            row_lay.setSpacing(6)
+            row_lay.setContentsMargins(0, 0, 0, 0)
+            for slot in self._spin_slots[row * NUM_SPIN_SLOTS:(row + 1) * NUM_SPIN_SLOTS]:
+                row_lay.addWidget(slot)
+            row_lay.addStretch()
+            spin_area_lay.addWidget(row_w)
+
         # ── Right panel: buttons + scripting side by side ─────────────────────
         right_w   = QWidget()
         right_lay = QHBoxLayout(right_w)
@@ -1046,7 +1465,7 @@ class DynoWindow(QMainWindow):
         btn_w   = QWidget()
         btn_lay = QVBoxLayout(btn_w)
         btn_lay.setSpacing(8)
-        btn_w.setFixedWidth(140)
+        btn_w.setFixedWidth(200)
 
         self._main_enable_btn = QPushButton("Main Enable")
         self._main_enable_btn.setCheckable(True)
@@ -1100,6 +1519,101 @@ class DynoWindow(QMainWindow):
         btn_lay.addSpacing(12)
         btn_lay.addWidget(self._output1_btn)
         btn_lay.addWidget(fault_btn)
+        btn_lay.addSpacing(12)
+
+        btn_lay.addWidget(QLabel("Torque Ch1 Scale:"))
+        self._ch1_scale_combo = QComboBox()
+        for v in TORQUE_SCALE_OPTIONS:
+            self._ch1_scale_combo.addItem(f"{v} Nm", v)
+        self._ch1_scale_combo.setCurrentIndex(TORQUE_SCALE_OPTIONS.index(200))
+        self._ch1_scale_combo.currentIndexChanged.connect(self._on_ch1_scale_changed)
+        btn_lay.addWidget(self._ch1_scale_combo)
+
+        zero_ch1_btn = QPushButton("Zero Ch1")
+        zero_ch1_btn.setToolTip("Capture current Ch1 reading as zero offset")
+        zero_ch1_btn.clicked.connect(self._cmd.pulse_torque_zero_ch1)
+        btn_lay.addWidget(zero_ch1_btn)
+
+        btn_lay.addWidget(QLabel("Torque Ch2 Scale:"))
+        self._ch2_scale_combo = QComboBox()
+        for v in TORQUE_SCALE_OPTIONS:
+            self._ch2_scale_combo.addItem(f"{v} Nm", v)
+        self._ch2_scale_combo.setCurrentIndex(TORQUE_SCALE_OPTIONS.index(20))
+        self._ch2_scale_combo.currentIndexChanged.connect(self._on_ch2_scale_changed)
+        btn_lay.addWidget(self._ch2_scale_combo)
+
+        zero_ch2_btn = QPushButton("Zero Ch2")
+        zero_ch2_btn.setToolTip("Capture current Ch2 reading as zero offset")
+        zero_ch2_btn.clicked.connect(self._cmd.pulse_torque_zero_ch2)
+        btn_lay.addWidget(zero_ch2_btn)
+
+        btn_lay.addSpacing(12)
+
+        save_log_btn = QPushButton("Save Log")
+        save_log_btn.setToolTip(
+            "Close the current CSV log and start a new file with a fresh timestamp")
+        save_log_btn.clicked.connect(self._cmd.pulse_save_log)
+        btn_lay.addWidget(save_log_btn)
+
+        btn_lay.addSpacing(12)
+
+        # ── Main drive fault section ──────────────────────────────────────────
+        main_fault_group = QGroupBox("Main Drive Faults")
+        main_fault_lay   = QVBoxLayout(main_fault_group)
+        main_fault_lay.setSpacing(4)
+        main_fault_lay.setContentsMargins(6, 6, 6, 6)
+
+        main_fault_lay.addWidget(QLabel("Last Error:"))
+        self._main_last_error = QTextEdit()
+        self._main_last_error.setReadOnly(True)
+        self._main_last_error.setLineWrapMode(QTextEdit.NoWrap)
+        self._main_last_error.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._main_last_error.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._main_last_error.setFixedHeight(44)
+        self._main_last_error.setPlaceholderText("—")
+        main_fault_lay.addWidget(self._main_last_error)
+
+        main_fault_history_btn = QPushButton("Read Fault History")
+        main_fault_history_btn.clicked.connect(lambda: self._read_fault_history("main"))
+        main_fault_lay.addWidget(main_fault_history_btn)
+
+        self._main_fault_history = QTextEdit()
+        self._main_fault_history.setReadOnly(True)
+        self._main_fault_history.setFixedHeight(80)
+        self._main_fault_history.setPlaceholderText("(no history)")
+        main_fault_lay.addWidget(self._main_fault_history)
+
+        btn_lay.addWidget(main_fault_group)
+        btn_lay.addSpacing(8)
+
+        # ── DUT fault section ─────────────────────────────────────────────────
+        dut_fault_group = QGroupBox("DUT Faults")
+        dut_fault_lay   = QVBoxLayout(dut_fault_group)
+        dut_fault_lay.setSpacing(4)
+        dut_fault_lay.setContentsMargins(6, 6, 6, 6)
+
+        dut_fault_lay.addWidget(QLabel("Last Error:"))
+        self._dut_last_error = QTextEdit()
+        self._dut_last_error.setReadOnly(True)
+        self._dut_last_error.setLineWrapMode(QTextEdit.NoWrap)
+        self._dut_last_error.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._dut_last_error.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._dut_last_error.setFixedHeight(44)
+        self._dut_last_error.setPlaceholderText("—")
+        dut_fault_lay.addWidget(self._dut_last_error)
+
+        dut_fault_history_btn = QPushButton("Read Fault History")
+        dut_fault_history_btn.clicked.connect(lambda: self._read_fault_history("dut"))
+        dut_fault_lay.addWidget(dut_fault_history_btn)
+
+        self._dut_fault_history = QTextEdit()
+        self._dut_fault_history.setReadOnly(True)
+        self._dut_fault_history.setFixedHeight(80)
+        self._dut_fault_history.setPlaceholderText("(no history)")
+        dut_fault_lay.addWidget(self._dut_fault_history)
+
+        btn_lay.addWidget(dut_fault_group)
+
         btn_lay.addStretch()
 
         # ── Scripting panel ───────────────────────────────────────────────────
@@ -1113,8 +1627,80 @@ class DynoWindow(QMainWindow):
         )
         self._script_panel.setMinimumWidth(280)
 
+        # ── SDO access panel ──────────────────────────────────────────────────
+        _hex_validator = QRegularExpressionValidator(
+            QRegularExpression("[0-9A-Fa-f]{0,8}"))
+
+        sdo_group = QGroupBox("SDO Access")
+        sdo_lay   = QVBoxLayout(sdo_group)
+        sdo_lay.setSpacing(4)
+        sdo_group.setFixedWidth(200)
+
+        self._sdo_drive = QComboBox()
+        self._sdo_drive.addItems(["main", "dut"])
+
+        self._sdo_index = QLineEdit()
+        self._sdo_index.setValidator(_hex_validator)
+        self._sdo_index.setPlaceholderText("6040")
+        self._sdo_index.setMaxLength(4)
+
+        self._sdo_sub = QLineEdit()
+        self._sdo_sub.setValidator(_hex_validator)
+        self._sdo_sub.setPlaceholderText("00")
+        self._sdo_sub.setMaxLength(2)
+
+        self._sdo_size = QComboBox()
+        self._sdo_size.addItems(["1 byte", "2 bytes", "4 bytes"])
+        self._sdo_size.setCurrentIndex(1)  # default 2 bytes
+
+        self._sdo_value = QLineEdit()
+        self._sdo_value.setPlaceholderText("value")
+
+        self._sdo_reg_info = QLabel("")
+        self._sdo_reg_info.setFont(QFont("Monospace", 7))
+        self._sdo_reg_info.setWordWrap(True)
+        self._sdo_reg_info.setStyleSheet("color: #888;")
+
+        self._sdo_index.textChanged.connect(self._sdo_lookup_register)
+        self._sdo_sub.textChanged.connect(self._sdo_lookup_register)
+
+        sdo_read_btn  = QPushButton("Read SDO")
+        sdo_write_btn = QPushButton("Write SDO")
+        sdo_read_btn.clicked.connect(self._sdo_read)
+        sdo_write_btn.clicked.connect(self._sdo_write)
+        sdo_btn_row = QHBoxLayout()
+        sdo_btn_row.addWidget(sdo_read_btn)
+        sdo_btn_row.addWidget(sdo_write_btn)
+
+        self._sdo_feedback = QTextEdit()
+        self._sdo_feedback.setReadOnly(True)
+        self._sdo_feedback.setFont(QFont("Monospace", 8))
+        self._sdo_feedback.setMinimumHeight(80)
+        self._sdo_feedback.setPlaceholderText("(result)")
+
+        def _sdo_hex_row(label: str, widget: QLineEdit) -> QHBoxLayout:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            row.addWidget(QLabel("0x"))
+            row.addWidget(widget, 1)
+            return row
+
+        sdo_lay.addWidget(QLabel("Drive:"))
+        sdo_lay.addWidget(self._sdo_drive)
+        sdo_lay.addLayout(_sdo_hex_row("Index:", self._sdo_index))
+        sdo_lay.addLayout(_sdo_hex_row("Sub:",   self._sdo_sub))
+        sdo_lay.addWidget(self._sdo_reg_info)
+        sdo_lay.addWidget(QLabel("Size:"))
+        sdo_lay.addWidget(self._sdo_size)
+        sdo_lay.addWidget(QLabel("Value:"))
+        sdo_lay.addWidget(self._sdo_value)
+        sdo_lay.addLayout(sdo_btn_row)
+        sdo_lay.addWidget(QLabel("Response:"))
+        sdo_lay.addWidget(self._sdo_feedback, 1)
+
         right_lay.addWidget(btn_w)
         right_lay.addWidget(self._script_panel, 1)
+        right_lay.addWidget(sdo_group)
 
         # ── Splitter ───────────────────────────────────────────────────────────
         splitter = QSplitter(Qt.Horizontal)
@@ -1133,6 +1719,7 @@ class DynoWindow(QMainWindow):
         central = QWidget()
         vlay    = QVBoxLayout(central)
         vlay.addWidget(splitter, 1)
+        vlay.addWidget(spin_area)
         vlay.addWidget(self._status_label)
         self.setCentralWidget(central)
 
@@ -1153,13 +1740,25 @@ class DynoWindow(QMainWindow):
         self._output1_btn.setText(
             "Output 1 ON" if self._hold_output1 else "Hold Output 1")
 
+    def _on_ch1_scale_changed(self, idx: int) -> None:
+        self._ch1_scale = self._ch1_scale_combo.itemData(idx)
+
+    def _on_ch2_scale_changed(self, idx: int) -> None:
+        self._ch2_scale = self._ch2_scale_combo.itemData(idx)
+
     def _main_zero(self):
         for slot in self._slots:
+            if slot.field in MAIN_ZERO_FIELDS:
+                slot.zero()
+        for slot in self._spin_slots:
             if slot.field in MAIN_ZERO_FIELDS:
                 slot.zero()
 
     def _dut_zero(self):
         for slot in self._slots:
+            if slot.field in DUT_ZERO_FIELDS:
+                slot.zero()
+        for slot in self._spin_slots:
             if slot.field in DUT_ZERO_FIELDS:
                 slot.zero()
 
@@ -1204,6 +1803,11 @@ class DynoWindow(QMainWindow):
         for slot in self._slots:
             if slot.field is not None:
                 numeric[slot.field] = slot.value
+        for slot in self._spin_slots:
+            if slot.field is not None:
+                numeric[slot.field] = slot.value
+        numeric["ch1_torque_scale"] = self._ch1_scale
+        numeric["ch2_torque_scale"] = self._ch2_scale
         self._cmd.set_command(
             numeric      = numeric,
             main_enable  = self._main_enabled,
@@ -1213,13 +1817,183 @@ class DynoWindow(QMainWindow):
             dut_mode     = DS402_MODES[self._dut_mode_combo.currentIndex()][1],
         )
 
+    # ── SDO handlers ──────────────────────────────────────────────────────────
+
+    def _poll_sdo_response(self):
+        now = time.monotonic()
+
+        # Timeout: fault history sequence waiting too long for next response
+        if self._fault_hist_state is not None:
+            if now - self._fault_hist_state["request_time"] > SDO_TIMEOUT_S:
+                drive  = self._fault_hist_state["drive"]
+                sub    = self._fault_hist_state["next_sub"]
+                widget = self._main_fault_history if drive == "main" else self._dut_fault_history
+                widget.setPlainText(f"Timeout on sub 0x{sub:02X}")
+                self._fault_hist_state = None
+                return
+
+        # Timeout: regular SDO read/write waiting too long
+        if self._fault_hist_state is None and self._sdo_pending_time is not None:
+            if now - self._sdo_pending_time > SDO_TIMEOUT_S:
+                self._sdo_feedback.setPlainText("Timeout — no response from bridge")
+                self._sdo_pending_time = None
+
+        data = self._cmd.pop_sdo_response()
+        if data is None:
+            return
+        if self._fault_hist_state is not None:
+            self._handle_fault_hist_response(data)
+        else:
+            self._sdo_pending_time = None
+            self._on_sdo_response(data)
+
+    def _read_fault_history(self, drive: str):
+        widget = self._main_fault_history if drive == "main" else self._dut_fault_history
+        widget.setPlainText("…reading…")
+        self._fault_hist_state = {
+            "drive": drive, "next_sub": 0, "results": [],
+            "request_time": time.monotonic(),
+        }
+        # sub 0x00 is UINT8 (error count), subs 1–4 are UINT32
+        self._cmd.request_sdo(drive, "read", 0x1003, 0x00, 1)
+
+    def _handle_fault_hist_response(self, data: dict):
+        state  = self._fault_hist_state
+        drive  = state["drive"]
+        widget = self._main_fault_history if drive == "main" else self._dut_fault_history
+        state["results"].append(data)
+        # Abort on any failure — avoids queuing further SDO requests to a
+        # slave that isn't responding (each would pause the RT PDO loop).
+        if not data.get("success"):
+            self._fault_hist_state = None
+            self._render_fault_history(state["results"], widget)
+            return
+        next_sub = state["next_sub"] + 1
+        state["next_sub"] = next_sub
+        if next_sub <= 4:
+            state["request_time"] = time.monotonic()
+            self._cmd.request_sdo(drive, "read", 0x1003, next_sub, 4)
+        else:
+            self._fault_hist_state = None
+            self._render_fault_history(state["results"], widget)
+
+    def _render_fault_history(self, results: list, widget) -> None:
+        if not results or not results[0].get("success"):
+            widget.setPlainText("Read failed")
+            return
+        num_errors = results[0].get("value", 0)
+        if num_errors == 0:
+            widget.setPlainText("No faults stored")
+            return
+        lines = [f"{num_errors} fault(s) stored:"]
+        for i, entry in enumerate(results[1:], 1):
+            if i > num_errors:
+                break
+            if entry.get("success"):
+                code = entry.get("value", 0)
+                desc = _lookup_error(code)
+                lines.append(f"[{i}] {desc}" if desc else f"[{i}] 0x{code:08X}")
+            else:
+                lines.append(f"[{i}] read failed")
+        widget.setPlainText("\n".join(lines))
+
+    def _sdo_lookup_register(self):
+        """Update reg_info label and auto-set size when index/sub change."""
+        try:
+            idx = int(self._sdo_index.text() or "0", 16)
+            sub = int(self._sdo_sub.text()   or "0", 16)
+        except ValueError:
+            self._sdo_reg_info.setText("")
+            return
+        entry = _REGISTER_MAP.get((idx, sub))
+        if entry:
+            name  = entry.get("Name", "")
+            dtype = entry.get("Data Type", "")
+            self._sdo_reg_info.setText(f"{name}\n[{dtype}]")
+            size_map = {1: 0, 2: 1, 4: 2, 8: 2}
+            combo_idx = size_map.get(_dtype_size(dtype), 2)
+            self._sdo_size.setCurrentIndex(combo_idx)
+        else:
+            self._sdo_reg_info.setText("")
+
+    def _sdo_read(self):
+        drive    = self._sdo_drive.currentText()
+        index    = int(self._sdo_index.text() or "0", 16)
+        subindex = int(self._sdo_sub.text()   or "0", 16)
+        size     = [1, 2, 4][self._sdo_size.currentIndex()]
+        self._sdo_feedback.setPlainText("…waiting…")
+        self._sdo_pending_time = time.monotonic()
+        self._cmd.request_sdo(drive, "read", index, subindex, size)
+
+    def _sdo_write(self):
+        drive    = self._sdo_drive.currentText()
+        index    = int(self._sdo_index.text() or "0", 16)
+        subindex = int(self._sdo_sub.text()   or "0", 16)
+        size     = [1, 2, 4][self._sdo_size.currentIndex()]
+        entry = _REGISTER_MAP.get((index, subindex))
+        dtype = entry.get("Data Type", "") if entry else ""
+        text  = self._sdo_value.text().strip()
+        try:
+            if dtype:
+                raw_uint, size = _encode_sdo_value(text, dtype)
+            else:
+                raw_uint = int(text or "0", 0)
+        except Exception as e:
+            self._sdo_feedback.setPlainText(f"Parse error: {e}")
+            return
+        self._sdo_feedback.setPlainText("…waiting…")
+        self._sdo_pending_time = time.monotonic()
+        self._cmd.request_sdo(drive, "write", index, subindex, size, raw_uint)
+
+    def _on_sdo_response(self, data: dict):
+        if data.get("success"):
+            op      = data.get("op", "?").upper()
+            idx_str = data.get("index", "?")
+            sub_raw = data.get("subindex", 0)
+            raw_val = data.get("value", 0)
+            try:
+                idx_int = int(idx_str.replace("0x", "").replace("0X", ""), 16)
+                sub_int = int(sub_raw) if isinstance(sub_raw, int) else int(str(sub_raw), 0)
+            except Exception:
+                idx_int, sub_int = 0, 0
+            entry = _REGISTER_MAP.get((idx_int, sub_int))
+            dtype = entry.get("Data Type", "") if entry else ""
+            if dtype:
+                val_str = _decode_sdo_value(raw_val, dtype)
+            else:
+                val_str = data.get("value_hex", hex(raw_val))
+            name_line = f"Name:     {entry['Name']}\n" if entry else ""
+            type_line = f"Type:     {dtype}\n"         if dtype  else ""
+            self._sdo_feedback.setPlainText(
+                f"{op} OK\n"
+                f"Index:    {idx_str}\n"
+                f"Sub:      0x{sub_int:02X}\n"
+                f"{name_line}{type_line}"
+                f"Value:    {val_str}"
+            )
+        else:
+            self._sdo_feedback.setPlainText(
+                f"ERROR\n{data.get('error', 'unknown')}")
+
     def _on_limits_updated(self, drive: str) -> None:
         """Called from the ROS spin thread — schedule GUI update on the Qt thread."""
         QTimer.singleShot(0, lambda: self._refresh_slot_limits(drive))
+        QTimer.singleShot(0, lambda: self._refresh_error_display(drive))
+
+    def _refresh_all_errors(self) -> None:
+        for drive in ("main", "dut"):
+            self._refresh_error_display(drive)
+
+    def _refresh_error_display(self, drive: str) -> None:
+        code = self._cmd.get_error_code(drive)
+        text = _lookup_error(code)
+        widget = self._main_last_error if drive == "main" else self._dut_last_error
+        if widget.toPlainText() != text:
+            widget.setPlainText(text)
 
     def _refresh_slot_limits(self, drive: str) -> None:
         prefix = "main_" if drive == "main" else "dut_"
-        for slot in self._slots:
+        for slot in self._slots + self._spin_slots:
             if slot.field and slot.field.startswith(prefix):
                 result = self._cmd.get_limits(slot.field)
                 if result is not None:
@@ -1307,7 +2081,7 @@ def main():
     # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
     window = DynoWindow(commander)
-    window.resize(1400, 680)
+    window.resize(1400, 1100)
 
     if bridge_proc is not None:
         window.set_status(f"bridge_ros2 PID {bridge_proc.pid}")

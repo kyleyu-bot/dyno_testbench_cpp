@@ -56,13 +56,8 @@ extern "C" {
 
 #include <nlohmann/json.hpp>
 
-#include <quill/Backend.h>
-#include <quill/Frontend.h>
-#include <quill/LogMacros.h>
-#include <quill/Logger.h>
-#include <quill/sinks/FileSink.h>
-
 #include <algorithm>
+#include <fstream>
 #include <cmath>
 #include <limits>
 #include <any>
@@ -70,14 +65,15 @@ extern "C" {
 #include <chrono>
 #include <csignal>
 #include <ctime>
+#include <filesystem>
 #include <signal.h>
 #include <cstring>
-#include <sys/stat.h>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <pthread.h>
 #include <sched.h>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -91,11 +87,12 @@ using json            = nlohmann::json;
 // ── Signal handling ───────────────────────────────────────────────────────────
 
 static std::atomic<bool> g_shutdown{false};
+static std::atomic<bool> g_rotate_log{false};
 static void onSignal(int) { g_shutdown.store(true); }
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
-static constexpr const char* DEFAULT_TOPOLOGY      = "config/topology.dyno2.template6.json";
+static constexpr const char* DEFAULT_TOPOLOGY      = "config/ethercat_device_config/topology.dyno2.template6.json";
 static constexpr const char* DEFAULT_DRIVE_SLAVE   = "main_drive";
 static constexpr const char* DEFAULT_DUT_SLAVE     = "dut";
 static constexpr const char* DEFAULT_ENCODER_SLAVE = "encoder_interface";
@@ -140,10 +137,43 @@ struct CommandState {
     float    dut_pos_kp           = 0.0f;
     float    dut_pos_ki           = 0.0f;
     float    dut_pos_kd           = 0.0f;
+    // Torque sensor ADC scale (Nm); use current value as default so omitted
+    // command messages leave the scale unchanged.
+    float    ch1_torque_scale     = 200.0f;  // matches El3002Adapter ch1 default
+    float    ch2_torque_scale     = 20.0f;   // matches El3002Adapter ch2 default
+    // One-shot zero flags — cleared by the bridge after applying.
+    bool     zero_torque_ch1      = false;
+    bool     zero_torque_ch2      = false;
+    // One-shot log-rotation flag — triggers drain thread to close and reopen CSV.
+    bool     save_log             = false;
 };
 
 static std::mutex      g_cmd_mutex;
 static CommandState    g_cmd_state;
+
+// ── SDO request / response (written by ROS2 subscriber, executed by main loop) ─
+
+struct SdoRequest {
+    bool     pending   = false;
+    bool     is_write  = false;
+    int      slave_idx = 0;
+    uint16_t index     = 0;
+    uint8_t  subindex  = 0;
+    int      size      = 4;   // bytes: 1, 2, or 4
+    int64_t  value     = 0;   // used for writes only
+};
+struct SdoResponse {
+    std::string op;
+    uint16_t    index    = 0;
+    uint8_t     subindex = 0;
+    int         size     = 0;
+    bool        success  = false;
+    int64_t     value    = 0;
+    std::string error;
+};
+
+static std::mutex   g_sdo_mutex;
+static SdoRequest   g_sdo_req;
 
 // ── DS402 helpers ─────────────────────────────────────────────────────────────
 
@@ -173,6 +203,7 @@ public:
         pub_enc_   = create_publisher<std_msgs::msg::UInt32>("/dyno/encoder/count",       10);
         pub_ch1_t_ = create_publisher<std_msgs::msg::Float64>("/dyno/torque/ch1",         10);
         pub_ch2_t_ = create_publisher<std_msgs::msg::Float64>("/dyno/torque/ch2",         10);
+        pub_sdo_   = create_publisher<std_msgs::msg::String>("/dyno/sdo_response",        10);
 
         // Command subscriber
         sub_cmd_ = create_subscription<std_msgs::msg::String>(
@@ -214,13 +245,68 @@ public:
                     g_cmd_state.dut_pos_kp          = j.value("dut_pos_kp",           g_cmd_state.dut_pos_kp);
                     g_cmd_state.dut_pos_ki          = j.value("dut_pos_ki",           g_cmd_state.dut_pos_ki);
                     g_cmd_state.dut_pos_kd          = j.value("dut_pos_kd",           g_cmd_state.dut_pos_kd);
+                    g_cmd_state.ch1_torque_scale    = j.value("ch1_torque_scale",     g_cmd_state.ch1_torque_scale);
+                    g_cmd_state.ch2_torque_scale    = j.value("ch2_torque_scale",     g_cmd_state.ch2_torque_scale);
+                    // One-shot: OR with current so a true is never lost between snapshots.
+                    g_cmd_state.zero_torque_ch1    |= j.value("zero_torque_ch1", false);
+                    g_cmd_state.zero_torque_ch2    |= j.value("zero_torque_ch2", false);
+                    g_cmd_state.save_log           |= j.value("save_log",        false);
                 } catch (...) {
                     RCLCPP_WARN(get_logger(), "Failed to parse /dyno/command JSON");
                 }
             }
         );
 
+        // SDO request subscriber — stores request; main loop executes and publishes response.
+        sub_sdo_ = create_subscription<std_msgs::msg::String>(
+            "/dyno/sdo_request", 10,
+            [this](const std_msgs::msg::String::SharedPtr msg) {
+                try {
+                    const json j = json::parse(msg->data);
+                    SdoRequest req;
+                    req.pending   = true;
+                    req.is_write  = (j.value("op", "read") == "write");
+                    const std::string drv = j.value("drive", "main");
+                    req.slave_idx = (drv == "dut") ? dut_soem_idx_ : drive_soem_idx_;
+                    req.index     = static_cast<uint16_t>(
+                                        std::stoul(j.value("index", "0"), nullptr, 16));
+                    req.subindex  = static_cast<uint8_t>(
+                                        std::stoul(j.value("subindex", "0"), nullptr, 16));
+                    req.size      = j.value("size", 4);
+                    req.value     = j.value("value", int64_t{0});
+                    std::lock_guard<std::mutex> lk(g_sdo_mutex);
+                    g_sdo_req = req;
+                } catch (const std::exception& e) {
+                    RCLCPP_WARN(get_logger(), "Bad /dyno/sdo_request: %s", e.what());
+                }
+            }
+        );
+
         RCLCPP_INFO(get_logger(), "DynoBridgeNode ready.");
+    }
+
+    void setSlaveIndices(int drive_idx, int dut_idx) {
+        drive_soem_idx_ = drive_idx;
+        dut_soem_idx_   = dut_idx;
+    }
+
+    void publishSdoResponse(const SdoResponse& resp) {
+        std::ostringstream idx_ss, val_ss;
+        idx_ss << "0x" << std::hex << std::uppercase << std::setw(4)
+               << std::setfill('0') << resp.index;
+        val_ss << "0x" << std::hex << std::uppercase << resp.value;
+        json jr;
+        jr["op"]        = resp.op;
+        jr["index"]     = idx_ss.str();
+        jr["subindex"]  = resp.subindex;
+        jr["size"]      = resp.size;
+        jr["success"]   = resp.success;
+        jr["value"]     = resp.value;
+        jr["value_hex"] = val_ss.str();
+        jr["error"]     = resp.error;
+        std_msgs::msg::String out;
+        out.data = jr.dump();
+        pub_sdo_->publish(out);
     }
 
     void publishTelemetry(
@@ -267,13 +353,17 @@ public:
     }
 
 private:
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  pub_main_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  pub_dut_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  pub_stats_;
-    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr  pub_enc_;
-    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_ch1_t_;
-    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_ch2_t_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_main_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_dut_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_stats_;
+    rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr   pub_enc_;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr  pub_ch1_t_;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr  pub_ch2_t_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_sdo_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_cmd_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_sdo_;
+    int drive_soem_idx_ = 1;
+    int dut_soem_idx_   = 2;
 };
 
 // ── PDO logging helpers ────────────────────────────────────────────────────────
@@ -328,6 +418,24 @@ static std::string record_to_csv(const dyno::PdoLogRecord& r)
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
+
+/// Create test_data_log/YYYY-MM-DD/HHMMSS/dyno_pdo.csv, making all parent dirs.
+static std::string make_run_csv_path(rclcpp::Logger logger)
+{
+    std::time_t t    = std::time(nullptr);
+    std::tm*    tm_  = std::localtime(&t);
+    char date_buf[16], time_buf[8];
+    std::strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", tm_);
+    std::strftime(time_buf, sizeof(time_buf), "%H%M%S",   tm_);
+    std::string run_dir = std::string("test_data_log/") + date_buf + "/" + time_buf;
+    std::error_code ec;
+    std::filesystem::create_directories(run_dir, ec);
+    if (ec) {
+        RCLCPP_WARN(logger, "Could not create log dir '%s': %s",
+                    run_dir.c_str(), ec.message().c_str());
+    }
+    return run_dir + "/dyno_pdo.csv";
+}
 
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
@@ -423,6 +531,8 @@ int main(int argc, char** argv) {
         "[init] SOEM indices — %s=%d  %s=%d",
         drive_slave.c_str(), drive_soem_idx,
         dut_slave.c_str(), dut_soem_idx);
+
+    node->setSlaveIndices(drive_soem_idx, dut_soem_idx);
 
     // Extract startup gains for both drives from SDO reads done during init.
     struct DriveGains {
@@ -522,58 +632,35 @@ int main(int argc, char** argv) {
 
     EthercatLoop loop(*rt, cfg.cycle_hz, rt_cfg);
 
-    // ── Quill logging setup ───────────────────────────────────────────────────
-    // Ensure test_data_log/ directory exists next to the binary's cwd.
-    static constexpr const char* LOG_DIR = "test_data_log";
-    {
-        struct stat st{};
-        if (stat(LOG_DIR, &st) != 0) {
-            if (mkdir(LOG_DIR, 0755) != 0) {
-                RCLCPP_WARN(node->get_logger(),
-                    "Could not create log directory '%s' (errno=%d) — logging to cwd.", LOG_DIR, errno);
-            }
-        }
-    }
-
-    // Build a timestamped log filename: test_data_log/dyno_pdo_YYYYMMDD_HHMMSS.csv
-    std::string log_path;
-    {
-        std::time_t t   = std::time(nullptr);
-        std::tm*    tm_ = std::localtime(&t);
-        char        buf[64];
-        std::strftime(buf, sizeof(buf), "test_data_log/dyno_pdo_%Y%m%d_%H%M%S.csv", tm_);
-        log_path = buf;
-    }
-
-    quill::Backend::start();
-
-    quill::FileSinkConfig fsink_cfg;
-    fsink_cfg.set_open_mode('w');
-    auto file_sink = quill::Frontend::create_or_get_sink<quill::FileSink>(log_path, fsink_cfg);
-
-    // Use a message-only pattern — we supply all timestamp info inside the CSV row.
-    quill::Logger* pdo_logger = quill::Frontend::create_or_get_logger(
-        "pdo",
-        std::move(file_sink),
-        quill::PatternFormatterOptions{"%(message)"});
-
+    // ── CSV logging setup ─────────────────────────────────────────────────────
+    std::string   log_path = make_run_csv_path(node->get_logger());
+    std::ofstream csv_file(log_path);
+    csv_file << dyno::PDO_LOG_CSV_HEADER << '\n';
     RCLCPP_INFO(node->get_logger(), "PDO log: %s", log_path.c_str());
 
     // Ring buffer shared between the RT cycle callback and the drain thread.
     // Depth 200 = ~200 ms of headroom at 1000 Hz before the drain thread catches up.
     dyno::PdoLogBuffer<200> log_buf;
 
-    // Write CSV header as first line.
-    LOG_INFO(pdo_logger, "{}", dyno::PDO_LOG_CSV_HEADER);
-
-    // Drain thread: pops records from the ring buffer and writes them via quill.
+    // Drain thread: pops records from the ring buffer and writes directly to CSV.
+    // When g_rotate_log is set (Save Log button), it flushes the current file,
+    // opens a new timestamped file, and continues logging there.
     std::thread log_drain([&]() {
         while (!g_shutdown.load() || !log_buf.empty()) {
             while (auto rec = log_buf.pop()) {
-                LOG_INFO(pdo_logger, "{}", record_to_csv(*rec));
+                csv_file << record_to_csv(*rec) << '\n';
+            }
+            if (g_rotate_log.exchange(false)) {
+                csv_file.flush();
+                csv_file.close();
+                log_path = make_run_csv_path(node->get_logger());
+                csv_file.open(log_path);
+                csv_file << dyno::PDO_LOG_CSV_HEADER << '\n';
+                RCLCPP_INFO(node->get_logger(), "PDO log rotated: %s", log_path.c_str());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
+        csv_file.close();
     });
 
     // ── Register cycle callback — fires from RT thread at EtherCAT cycle rate ─
@@ -781,6 +868,90 @@ int main(int argc, char** argv) {
             cmd = g_cmd_state;
         }
 
+        // Handle one-shot save_log: signal the drain thread to rotate the CSV file.
+        if (cmd.save_log) {
+            g_rotate_log.store(true);
+            std::lock_guard<std::mutex> lk(g_cmd_mutex);
+            g_cmd_state.save_log = false;
+        }
+
+        // SDO read/write — mailbox channel is separate from PDO, safe in main thread.
+        {
+            SdoRequest req;
+            {
+                std::lock_guard<std::mutex> lk(g_sdo_mutex);
+                if (g_sdo_req.pending) {
+                    req = g_sdo_req;
+                    g_sdo_req.pending = false;
+                }
+            }
+            if (req.pending) {
+                SdoResponse resp;
+                resp.op       = req.is_write ? "write" : "read";
+                resp.index    = req.index;
+                resp.subindex = req.subindex;
+                resp.size     = req.size;
+
+                // EC_TIMEOUTSAFE = 20 ms — plenty for an operational drive.
+                static constexpr int SDO_TIMEOUT_US = EC_TIMEOUTSAFE;
+
+                if (req.slave_idx < 1) {
+                    resp.success = false;
+                    resp.error   = "Slave not present (index="
+                                   + std::to_string(req.slave_idx) + ")";
+                } else if ((ec_slave[req.slave_idx].state & 0x0F) < EC_STATE_PRE_OP) {
+                    resp.success = false;
+                    resp.error   = "Slave not mailbox-ready (state=0x"
+                                   + std::to_string(ec_slave[req.slave_idx].state & 0x0F) + ")";
+                } else {
+                    // Stop the RT PDO loop so the mailbox call is never concurrent
+                    // with ec_send_processdata / ec_receive_processdata — SOEM is
+                    // not thread-safe and concurrent calls corrupt shared state.
+                    loop.stop();
+                    uint8_t buf[8] = {};
+                    if (req.is_write) {
+                        std::memcpy(buf, &req.value, static_cast<size_t>(req.size));
+                        int rc = ec_SDOwrite(static_cast<uint16_t>(req.slave_idx),
+                                             req.index, req.subindex,
+                                             FALSE, req.size, buf, SDO_TIMEOUT_US);
+                        resp.success = (rc > 0);
+                        resp.value   = req.value;
+                        if (!resp.success)
+                            resp.error = "ec_SDOwrite failed (rc=" + std::to_string(rc) + ")";
+                    } else {
+                        int sz = req.size;
+                        int rc = ec_SDOread(static_cast<uint16_t>(req.slave_idx),
+                                            req.index, req.subindex,
+                                            FALSE, &sz, buf, SDO_TIMEOUT_US);
+                        resp.success = (rc > 0);
+                        resp.size    = sz;
+                        if (resp.success) {
+                            int64_t v = 0;
+                            std::memcpy(&v, buf, static_cast<size_t>(sz));
+                            resp.value = v;
+                        } else {
+                            resp.error = "ec_SDOread failed (rc=" + std::to_string(rc) + ")";
+                        }
+                    }
+                    loop.start();  // resume PDO
+                }
+                node->publishSdoResponse(resp);
+            }
+        }
+
+        // Apply torque sensor ADC scale to the adapter.
+        // Note: setCh1/2TorqueScale() writes ch1_torque_scale_ which is also read
+        // by the RT cycle callback's scaledTorqueCh1/2() — on x86_64, aligned float
+        // read/write is naturally atomic, so the worst case is one stale cycle during
+        // a user-initiated scale change. Acceptable for an infrequent measurement setting.
+        try {
+            el3002->setCh1TorqueScale(cmd.ch1_torque_scale);
+            el3002->setCh2TorqueScale(cmd.ch2_torque_scale);
+        } catch (const std::exception& e) {
+            RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 5000,
+                "Ignoring invalid torque scale value: %s", e.what());
+        }
+
         // Build EtherCAT commands.
         // velocity: rad/s → mrev/s;  position: rad → encoder counts
         static constexpr float TWO_PI = 2.0f * static_cast<float>(M_PI);
@@ -873,6 +1044,17 @@ int main(int argc, char** argv) {
             auto torque_it = status.by_slave.find(torque_slave);
             if (torque_it != status.by_slave.end() && torque_it->second.has_value()) {
                 const auto& d = std::any_cast<const beckhoff::el3002::Data&>(torque_it->second);
+                // Apply one-shot zero before reading, then clear flags in shared state.
+                if (cmd.zero_torque_ch1) {
+                    el3002->zeroTorqueCh1(d);
+                    std::lock_guard<std::mutex> lk(g_cmd_mutex);
+                    g_cmd_state.zero_torque_ch1 = false;
+                }
+                if (cmd.zero_torque_ch2) {
+                    el3002->zeroTorqueCh2(d);
+                    std::lock_guard<std::mutex> lk(g_cmd_mutex);
+                    g_cmd_state.zero_torque_ch2 = false;
+                }
                 ch1_t = static_cast<double>(el3002->scaledTorqueCh1(d));
                 ch2_t = static_cast<double>(el3002->scaledTorqueCh2(d));
             }
@@ -893,7 +1075,7 @@ int main(int argc, char** argv) {
                     std::printf(
                         "[main] cycle=%lu wkc=%d "
                         "al=%s state=%s "
-                        "cmd_60FF=%d speed_606C=%d "
+                        "cmd_60FF=%.3f speed_606C=%d "
                         "mode_6061=%d sw=0x%04X err=0x%04X "
                         "bus_v=%.2f "
                         "vel_kp=%.4f vel_ki=%.4f torque_kp=%.4f\n",
@@ -901,7 +1083,7 @@ int main(int argc, char** argv) {
                         stats.last_wkc,
                         alStateName(static_cast<int>(ec_slave[drive_soem_idx].state)).c_str(),
                         cia402Name(ds.cia402_state),
-                        cmd.main_speed,
+                        static_cast<double>(cmd.main_speed),
                         ds.measured_input_side_velocity_raw,
                         static_cast<int>(ds.mode_of_operation_display),
                         static_cast<unsigned>(ds.status_word),
@@ -919,7 +1101,7 @@ int main(int argc, char** argv) {
                     std::printf(
                         "[ dut] cycle=%lu wkc=%d "
                         "al=%s state=%s "
-                        "cmd_60FF=%d speed_606C=%d "
+                        "cmd_60FF=%.3f speed_606C=%d "
                         "mode_6061=%d sw=0x%04X err=0x%04X "
                         "bus_v=%.2f "
                         "vel_kp=%.4f vel_ki=%.4f torque_kp=%.4f\n",
@@ -927,7 +1109,7 @@ int main(int argc, char** argv) {
                         stats.last_wkc,
                         alStateName(dut_present ? static_cast<int>(ec_slave[dut_soem_idx].state) : 0).c_str(),
                         cia402Name(ds.cia402_state),
-                        cmd.dut_speed,
+                        static_cast<double>(cmd.dut_speed),
                         ds.measured_input_side_velocity_raw,
                         static_cast<int>(ds.mode_of_operation_display),
                         static_cast<unsigned>(ds.status_word),
@@ -983,8 +1165,7 @@ int main(int argc, char** argv) {
 
     // Drain remaining log records and flush quill's async backend.
     log_drain.join();
-    quill::Backend::stop();
-    RCLCPP_INFO(node->get_logger(), "PDO log flushed: %s", log_path.c_str());
+    RCLCPP_INFO(node->get_logger(), "PDO log saved: %s", log_path.c_str());
 
     executor->cancel();
     ros_thread.join();

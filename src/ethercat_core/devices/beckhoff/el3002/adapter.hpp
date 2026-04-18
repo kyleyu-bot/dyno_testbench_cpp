@@ -42,9 +42,15 @@ public:
     void setCh1TorqueScale(float s);
     void setCh2TorqueScale(float s);
 
+    // Capture the current reading as the zero offset (one-shot, mirroring Java YoELM3002).
+    void zeroTorqueCh1(const Data& d);
+    void zeroTorqueCh2(const Data& d);
+
 private:
     float ch1_torque_scale_;
     float ch2_torque_scale_;
+    float ch1_offset_raw_ = 0.0f;   // normalized ADC offset [-1,1]; subtracted before scaling
+    float ch2_offset_raw_ = 0.0f;
 
     static float validateTorqueScale(float s);
 };

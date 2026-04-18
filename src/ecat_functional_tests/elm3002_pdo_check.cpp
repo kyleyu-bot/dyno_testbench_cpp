@@ -85,7 +85,7 @@ static constexpr int NUM_SECTIONS = static_cast<int>(sizeof(SECTIONS) / sizeof(S
 
 // ── Argument defaults ─────────────────────────────────────────────────────────
 
-static constexpr const char* DEFAULT_TOPOLOGY = "config/topology.dyno2.template6.json";
+static constexpr const char* DEFAULT_TOPOLOGY = "config/ethercat_device_config/topology.dyno2.template6.json";
 static constexpr const char* DEFAULT_SLAVE    = "analog_input_interface";
 static constexpr double      DEFAULT_DURATION = 60.0;
 static constexpr double      DEFAULT_PRINT_HZ = 5.0;
