@@ -25,7 +25,6 @@ Controls:
 
 import argparse
 import importlib.util
-import inspect
 import json
 import os
 import signal
@@ -46,7 +45,7 @@ try:
         QSlider, QPushButton, QLabel, QGroupBox,
         QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem,
         QMenu, QAction, QComboBox, QTextEdit, QFormLayout,
-        QScrollArea, QSizePolicy, QLineEdit,
+        QScrollArea, QSizePolicy, QLineEdit, QCheckBox,
     )
 except ImportError:
     print("ERROR: PyQt5 not found.  pip install PyQt5", file=sys.stderr)
@@ -430,6 +429,8 @@ class DynoCommander(Node):
         self._dut_limits      = dict(_empty_limits)
         self._main_error_code: int = 0
         self._dut_error_code:  int = 0
+        self._main_al_state:   str = "?"
+        self._dut_al_state:    str = "?"
         self._limits_callback = None   # callable(drive: str), set by DynoWindow
 
         # Torque sensor readings — updated from /dyno/torque/{ch1,ch2}.
@@ -453,6 +454,11 @@ class DynoCommander(Node):
         self._pending_sdo_response = None   # written by ROS thread, read by Qt timer
         self.create_subscription(StringMsg, "/dyno/sdo_response",
             self._on_sdo_response, 10)
+
+        # Bus status (all slaves' AL states)
+        self._pending_bus_status = None     # written by ROS thread, read by Qt timer
+        self.create_subscription(StringMsg, "/dyno/bus_status",
+            self._on_bus_status, 10)
 
         self._pub_period_s = 1.0 / max(pub_hz, 1.0)
         self.create_timer(self._pub_period_s, self._publish)
@@ -506,19 +512,40 @@ class DynoCommander(Node):
             "pos_kd":     float(data.get("pos_kd",     0.0)),
         }
         error_code = int(data.get("err", 0))
+        al_state   = str(data.get("al", "?"))
         with self._limits_lock:
             if drive == "main":
                 self._main_limits     = limits
                 self._main_error_code = error_code
+                self._main_al_state   = al_state
             else:
                 self._dut_limits      = limits
                 self._dut_error_code  = error_code
+                self._dut_al_state    = al_state
         if self._limits_callback:
             self._limits_callback(drive)
 
     def get_error_code(self, drive: str) -> int:
         with self._limits_lock:
             return self._main_error_code if drive == "main" else self._dut_error_code
+
+    def get_al_state(self, drive: str) -> str:
+        with self._limits_lock:
+            return self._main_al_state if drive == "main" else self._dut_al_state
+
+    def _on_bus_status(self, msg: StringMsg) -> None:
+        try:
+            data = json.loads(msg.data)
+        except Exception:
+            return
+        with self._limits_lock:
+            self._pending_bus_status = data
+
+    def pop_bus_status(self):
+        with self._limits_lock:
+            data = self._pending_bus_status
+            self._pending_bus_status = None
+            return data
 
     def _on_torque(self, msg: Float64Msg, channel: str) -> None:
         with self._limits_lock:
@@ -612,6 +639,13 @@ class DynoCommander(Node):
         msg      = StringMsg()
         msg.data = json.dumps(payload)
         self._sdo_pub.publish(msg)
+
+    def request_pre_op(self, enter: bool) -> None:
+        op = "pre_op_all" if enter else "pre_op_off"
+        self._sdo_pub.publish(StringMsg(data=json.dumps({"op": op})))
+
+    def request_store_all(self, drive: str) -> None:
+        self._sdo_pub.publish(StringMsg(data=json.dumps({"op": "store_all", "drive": drive})))
 
     def _on_sdo_response(self, msg: StringMsg) -> None:
         try:
@@ -1397,6 +1431,7 @@ class DynoWindow(QMainWindow):
 
         self._fault_hist_state: dict | None = None  # active fault-history read state
         self._sdo_pending_time: float | None = None  # monotonic time of last SDO request
+        self._ecat_pending: str | None = None        # "pre_op", "main_store", "dut_store"
 
         self._sdo_poll_timer = QTimer(self)
         self._sdo_poll_timer.timeout.connect(self._poll_sdo_response)
@@ -1563,6 +1598,15 @@ class DynoWindow(QMainWindow):
         main_fault_lay.setSpacing(4)
         main_fault_lay.setContentsMargins(6, 6, 6, 6)
 
+        main_al_row = QHBoxLayout()
+        main_al_row.addWidget(QLabel("AL:"))
+        self._main_al_label = QLabel("?")
+        _mono = QFont("Monospace"); _mono.setPointSize(8)
+        self._main_al_label.setFont(_mono)
+        main_al_row.addWidget(self._main_al_label)
+        main_al_row.addStretch()
+        main_fault_lay.addLayout(main_al_row)
+
         main_fault_lay.addWidget(QLabel("Last Error:"))
         self._main_last_error = QTextEdit()
         self._main_last_error.setReadOnly(True)
@@ -1591,6 +1635,15 @@ class DynoWindow(QMainWindow):
         dut_fault_lay   = QVBoxLayout(dut_fault_group)
         dut_fault_lay.setSpacing(4)
         dut_fault_lay.setContentsMargins(6, 6, 6, 6)
+
+        dut_al_row = QHBoxLayout()
+        dut_al_row.addWidget(QLabel("AL:"))
+        self._dut_al_label = QLabel("?")
+        _mono2 = QFont("Monospace"); _mono2.setPointSize(8)
+        self._dut_al_label.setFont(_mono2)
+        dut_al_row.addWidget(self._dut_al_label)
+        dut_al_row.addStretch()
+        dut_fault_lay.addLayout(dut_al_row)
 
         dut_fault_lay.addWidget(QLabel("Last Error:"))
         self._dut_last_error = QTextEdit()
@@ -1675,7 +1728,7 @@ class DynoWindow(QMainWindow):
         self._sdo_feedback = QTextEdit()
         self._sdo_feedback.setReadOnly(True)
         self._sdo_feedback.setFont(QFont("Monospace", 8))
-        self._sdo_feedback.setMinimumHeight(80)
+        self._sdo_feedback.setMinimumHeight(50)
         self._sdo_feedback.setPlaceholderText("(result)")
 
         def _sdo_hex_row(label: str, widget: QLineEdit) -> QHBoxLayout:
@@ -1698,9 +1751,55 @@ class DynoWindow(QMainWindow):
         sdo_lay.addWidget(QLabel("Response:"))
         sdo_lay.addWidget(self._sdo_feedback, 1)
 
+        # ── EtherCAT Control panel ────────────────────────────────────────────
+        def _resp_label() -> QLabel:
+            lbl = QLabel("")
+            lbl.setFont(QFont("Monospace", 7))
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("color: #888;")
+            return lbl
+
+        ecat_group = QGroupBox("EtherCAT Control")
+        ecat_lay   = QVBoxLayout(ecat_group)
+        ecat_lay.setSpacing(3)
+        ecat_lay.setContentsMargins(6, 6, 6, 6)
+        ecat_group.setFixedWidth(220)
+
+        self._preop_chk = QCheckBox("All → Pre-OP")
+        self._preop_chk.toggled.connect(self._on_preop_toggled)
+        self._preop_resp = _resp_label()
+
+        main_store_btn = QPushButton("Main Store All")
+        main_store_btn.clicked.connect(lambda: self._store_all("main"))
+        self._main_store_resp = _resp_label()
+
+        dut_store_btn = QPushButton("DUT Store All")
+        dut_store_btn.clicked.connect(lambda: self._store_all("dut"))
+        self._dut_store_resp = _resp_label()
+
+        ecat_lay.addWidget(self._preop_chk)
+        ecat_lay.addWidget(self._preop_resp)
+        ecat_lay.addWidget(main_store_btn)
+        ecat_lay.addWidget(self._main_store_resp)
+        ecat_lay.addWidget(dut_store_btn)
+        ecat_lay.addWidget(self._dut_store_resp)
+
+        ecat_lay.addWidget(QLabel("Bus AL Status:"))
+        self._bus_status_panel = QTextEdit()
+        self._bus_status_panel.setReadOnly(True)
+        _bus_font = QFont("Monospace"); _bus_font.setPointSize(8)
+        self._bus_status_panel.setFont(_bus_font)
+        self._bus_status_panel.setFixedHeight(90)
+        self._bus_status_panel.setLineWrapMode(QTextEdit.NoWrap)
+        self._bus_status_panel.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._bus_status_panel.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._bus_status_panel.setPlaceholderText("(waiting for bridge)")
+        ecat_lay.addWidget(self._bus_status_panel)
+
         right_lay.addWidget(btn_w)
         right_lay.addWidget(self._script_panel, 1)
         right_lay.addWidget(sdo_group)
+        right_lay.addWidget(ecat_group)
 
         # ── Splitter ───────────────────────────────────────────────────────────
         splitter = QSplitter(Qt.Horizontal)
@@ -1832,17 +1931,31 @@ class DynoWindow(QMainWindow):
                 self._fault_hist_state = None
                 return
 
-        # Timeout: regular SDO read/write waiting too long
+        # Timeout: regular SDO read/write or ecat op waiting too long
         if self._fault_hist_state is None and self._sdo_pending_time is not None:
             if now - self._sdo_pending_time > SDO_TIMEOUT_S:
-                self._sdo_feedback.setPlainText("Timeout — no response from bridge")
+                if self._ecat_pending is not None:
+                    label = (self._main_store_resp if "main" in self._ecat_pending
+                             else self._dut_store_resp if "dut" in self._ecat_pending
+                             else self._preop_resp)
+                    label.setText("Timeout — no response")
+                    self._ecat_pending = None
+                else:
+                    self._sdo_feedback.setPlainText("Timeout — no response from bridge")
                 self._sdo_pending_time = None
+
+        bus_data = self._cmd.pop_bus_status()
+        if bus_data is not None:
+            self._update_bus_status(bus_data)
 
         data = self._cmd.pop_sdo_response()
         if data is None:
             return
         if self._fault_hist_state is not None:
             self._handle_fault_hist_response(data)
+        elif self._ecat_pending is not None:
+            self._sdo_pending_time = None
+            self._handle_ecat_response(data)
         else:
             self._sdo_pending_time = None
             self._on_sdo_response(data)
@@ -1975,6 +2088,60 @@ class DynoWindow(QMainWindow):
             self._sdo_feedback.setPlainText(
                 f"ERROR\n{data.get('error', 'unknown')}")
 
+    def _handle_ecat_response(self, data: dict) -> None:
+        op      = data.get("op", "")
+        success = data.get("success", False)
+        err     = data.get("error", "unknown error")
+        pending = self._ecat_pending
+        self._ecat_pending = None
+
+        if op in ("pre_op_all", "pre_op_off"):
+            self._preop_resp.setText("OK" if success else f"ERR: {err}")
+            # Sync checkbox to actual state without re-triggering the handler
+            self._preop_chk.blockSignals(True)
+            self._preop_chk.setChecked(op == "pre_op_all" and success)
+            self._preop_chk.blockSignals(False)
+        elif op == "store_all":
+            label = self._main_store_resp if pending == "main_store" else self._dut_store_resp
+            label.setText("OK — stored" if success else f"ERR: {err}")
+            # Uncheck Pre-OP checkbox — loop has been restarted
+            self._preop_chk.blockSignals(True)
+            self._preop_chk.setChecked(False)
+            self._preop_chk.blockSignals(False)
+            self._preop_resp.setText("")
+
+    def _update_bus_status(self, slaves: list) -> None:
+        lines = []
+        for s in slaves:
+            idx  = s.get("idx", "?")
+            name = s.get("name", "?")[:14].ljust(14)
+            al   = s.get("al", "?")
+            lines.append(f"[{idx:2}] {name}  {al}")
+        new_text = "\n".join(lines)
+        if self._bus_status_panel.toPlainText() == new_text:
+            return
+        sb  = self._bus_status_panel.verticalScrollBar()
+        pos = sb.value()
+        self._bus_status_panel.setPlainText(new_text)
+        sb.setValue(pos)
+
+    def _on_preop_toggled(self, checked: bool) -> None:
+        self._preop_resp.setText("…waiting…")
+        self._ecat_pending = "pre_op"
+        self._sdo_pending_time = time.monotonic()
+        self._cmd.request_pre_op(checked)
+
+    def _store_all(self, drive: str) -> None:
+        label = self._main_store_resp if drive == "main" else self._dut_store_resp
+        label.setText("…waiting…")
+        self._preop_chk.blockSignals(True)
+        self._preop_chk.setChecked(True)
+        self._preop_chk.blockSignals(False)
+        self._preop_resp.setText("(store in progress)")
+        self._ecat_pending = f"{drive}_store"
+        self._sdo_pending_time = time.monotonic()
+        self._cmd.request_store_all(drive)
+
     def _on_limits_updated(self, drive: str) -> None:
         """Called from the ROS spin thread — schedule GUI update on the Qt thread."""
         QTimer.singleShot(0, lambda: self._refresh_slot_limits(drive))
@@ -1990,6 +2157,9 @@ class DynoWindow(QMainWindow):
         widget = self._main_last_error if drive == "main" else self._dut_last_error
         if widget.toPlainText() != text:
             widget.setPlainText(text)
+        al = self._cmd.get_al_state(drive)
+        lbl = self._main_al_label if drive == "main" else self._dut_al_label
+        lbl.setText(al)
 
     def _refresh_slot_limits(self, drive: str) -> None:
         prefix = "main_" if drive == "main" else "dut_"
