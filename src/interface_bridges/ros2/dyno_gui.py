@@ -1447,7 +1447,13 @@ class DynoWindow(QMainWindow):
 
     def _build_ui(self):
         # ── Left: command field list ───────────────────────────────────────────
-        self._field_list = CommandFieldList()
+        self._field_list  = CommandFieldList()
+        field_list_outer  = QWidget()
+        field_list_outer_lay = QVBoxLayout(field_list_outer)
+        field_list_outer_lay.setContentsMargins(0, 0, 0, 0)
+        field_list_outer_lay.setSpacing(0)
+        field_list_outer_lay.addWidget(self._field_list)
+        field_list_outer_lay.addStretch(1)
 
         # ── Centre: slider slots ───────────────────────────────────────────────
         self._assigned_fields: set[str] = set()
@@ -1465,6 +1471,13 @@ class DynoWindow(QMainWindow):
         slots_lay.setSpacing(6)
         for slot in self._slots:
             slots_lay.addWidget(slot)
+
+        slots_outer     = QWidget()
+        slots_outer_lay = QVBoxLayout(slots_outer)
+        slots_outer_lay.setContentsMargins(0, 0, 0, 0)
+        slots_outer_lay.setSpacing(0)
+        slots_outer_lay.addWidget(slots_w)
+        slots_outer_lay.addStretch(1)
 
         # ── Spinbox rows (below sliders, full-width) ──────────────────────────
         self._spin_slots = [
@@ -1491,8 +1504,12 @@ class DynoWindow(QMainWindow):
             spin_area_lay.addWidget(row_w)
 
         # ── Right panel: buttons + scripting side by side ─────────────────────
-        right_w   = QWidget()
-        right_lay = QHBoxLayout(right_w)
+        right_w     = QWidget()
+        right_outer = QVBoxLayout(right_w)
+        right_outer.setContentsMargins(0, 0, 0, 0)
+        right_outer.setSpacing(0)
+        right_inner = QWidget()
+        right_lay   = QHBoxLayout(right_inner)
         right_lay.setSpacing(6)
         right_lay.setContentsMargins(0, 0, 0, 0)
 
@@ -1667,8 +1684,6 @@ class DynoWindow(QMainWindow):
 
         btn_lay.addWidget(dut_fault_group)
 
-        btn_lay.addStretch()
-
         # ── Scripting panel ───────────────────────────────────────────────────
         self._script_panel = ScriptingPanel(
             self._cmd, self._scripts_dir,
@@ -1789,22 +1804,30 @@ class DynoWindow(QMainWindow):
         self._bus_status_panel.setReadOnly(True)
         _bus_font = QFont("Monospace"); _bus_font.setPointSize(8)
         self._bus_status_panel.setFont(_bus_font)
-        self._bus_status_panel.setFixedHeight(90)
+        self._bus_status_panel.setMinimumHeight(60)
         self._bus_status_panel.setLineWrapMode(QTextEdit.NoWrap)
         self._bus_status_panel.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._bus_status_panel.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._bus_status_panel.setPlaceholderText("(waiting for bridge)")
-        ecat_lay.addWidget(self._bus_status_panel)
+        ecat_lay.addWidget(self._bus_status_panel, 1)
 
         right_lay.addWidget(btn_w)
         right_lay.addWidget(self._script_panel, 1)
         right_lay.addWidget(sdo_group)
         right_lay.addWidget(ecat_group)
+        right_outer.addWidget(right_inner)
+        right_outer.addStretch(1)
+
+        # Match slider column height to right panel natural height so "Clear"
+        # buttons align with the bottom of the Output / SDO / Bus AL boxes.
+        _content_h = right_inner.sizeHint().height()
+        slots_w.setMinimumHeight(_content_h)
+        self._field_list.setMinimumHeight(_content_h)
 
         # ── Splitter ───────────────────────────────────────────────────────────
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._field_list)
-        splitter.addWidget(slots_w)
+        splitter.addWidget(field_list_outer)
+        splitter.addWidget(slots_outer)
         splitter.addWidget(right_w)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
