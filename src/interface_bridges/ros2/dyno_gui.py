@@ -1445,6 +1445,15 @@ class DynoWindow(QMainWindow):
         self._error_timer.timeout.connect(self._refresh_all_errors)
         self._error_timer.start(500)   # 2 Hz
 
+        QTimer.singleShot(0, self._fit_window_to_content)
+
+    def _fit_window_to_content(self):
+        """Resize height to content after first layout pass (actual sizes known)."""
+        h = (self._slots_w.height()
+             + self._spin_area.height()
+             + self._status_label.height())
+        self.resize(self.width(), h)
+
     def _build_ui(self):
         # ── Left: command field list ───────────────────────────────────────────
         self._field_list  = CommandFieldList()
@@ -1471,6 +1480,7 @@ class DynoWindow(QMainWindow):
         slots_lay.setSpacing(6)
         for slot in self._slots:
             slots_lay.addWidget(slot)
+        self._slots_w = slots_w
 
         slots_outer     = QWidget()
         slots_outer_lay = QVBoxLayout(slots_outer)
@@ -1505,6 +1515,7 @@ class DynoWindow(QMainWindow):
 
         slots_outer_lay.addWidget(spin_area)
         slots_outer_lay.addStretch(1)
+        self._spin_area = spin_area
 
         # ── Right panel: buttons + scripting side by side ─────────────────────
         right_w     = QWidget()
@@ -1843,9 +1854,14 @@ class DynoWindow(QMainWindow):
         # ── Central widget ─────────────────────────────────────────────────────
         central = QWidget()
         vlay    = QVBoxLayout(central)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(0)
         vlay.addWidget(splitter, 1)
         vlay.addWidget(self._status_label)
         self.setCentralWidget(central)
+
+        # Rough initial width; height corrected after first layout pass.
+        self.resize(self.sizeHint().width() or 1200, 800)
 
     # ── button callbacks ──────────────────────────────────────────────────────
 
