@@ -751,7 +751,7 @@ class SliderSlot(QGroupBox):
         self._slider.setValue(0)
         self._slider.setTickInterval(500)
         self._slider.setTickPosition(QSlider.TicksRight)
-        self._slider.setMinimumHeight(180)
+        self._slider.setMinimumHeight(90)
 
         # Min spinbox
         self._min_spin = QSpinBox()
@@ -1445,13 +1445,23 @@ class DynoWindow(QMainWindow):
         self._error_timer.timeout.connect(self._refresh_all_errors)
         self._error_timer.start(500)   # 2 Hz
 
-        QTimer.singleShot(0, self._fit_window_to_content)
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not hasattr(self, '_initially_sized'):
+            self._initially_sized = True
+            QTimer.singleShot(50, self._fit_window_to_content)
 
     def _fit_window_to_content(self):
         """Resize height to content after first layout pass (actual sizes known)."""
-        h = (self._slots_w.height()
-             + self._spin_area.height()
-             + self._status_label.height())
+        h = self.centralWidget().sizeHint().height()
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            # Leave a little headroom for the window frame/title bar.
+            h = min(h, max(200, screen.availableGeometry().height() - 360))
+        # Do not let the one-time auto-fit grow the window taller than the
+        # startup size; keeping it shorter lets the slider section settle to
+        # the same compact layout you'd get after manually dragging the top edge.
+        h = min(h, self.height())
         self.resize(self.width(), h)
 
     def _build_ui(self):
@@ -1486,8 +1496,8 @@ class DynoWindow(QMainWindow):
         slots_outer_lay = QVBoxLayout(slots_outer)
         slots_outer_lay.setContentsMargins(0, 0, 0, 0)
         slots_outer_lay.setSpacing(0)
+        slots_outer_lay.setAlignment(Qt.AlignTop)
         slots_outer_lay.addWidget(slots_w)
-        # spin_area added below after it is constructed
 
         # ── Spinbox rows (below sliders, full-width) ──────────────────────────
         self._spin_slots = [
@@ -1513,8 +1523,6 @@ class DynoWindow(QMainWindow):
             row_lay.addStretch()
             spin_area_lay.addWidget(row_w)
 
-        slots_outer_lay.addWidget(spin_area)
-        slots_outer_lay.addStretch(1)
         self._spin_area = spin_area
 
         # ── Right panel: buttons + scripting side by side ─────────────────────
@@ -1832,8 +1840,8 @@ class DynoWindow(QMainWindow):
         right_outer.addWidget(right_inner)
         right_outer.addStretch(1)
 
-        # Match slider column height to right panel natural height so "Clear"
-        # buttons align with the bottom of the Output / SDO / Bus AL boxes.
+        # Match the top splitter row so the left panel, slider "Clear" buttons,
+        # and right-side panels share the same bottom edge.
         _content_h = right_inner.sizeHint().height()
         slots_w.setMinimumHeight(_content_h)
         self._field_list.setMinimumHeight(_content_h)
@@ -1846,6 +1854,7 @@ class DynoWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
+        splitter.setFixedHeight(_content_h)
 
         # ── Status label ───────────────────────────────────────────────────────
         self._status_label = QLabel("bridge_ros2 starting…")
@@ -1856,12 +1865,13 @@ class DynoWindow(QMainWindow):
         vlay    = QVBoxLayout(central)
         vlay.setContentsMargins(0, 0, 0, 0)
         vlay.setSpacing(0)
-        vlay.addWidget(splitter, 1)
+        vlay.addWidget(splitter)
+        vlay.addWidget(spin_area)
         vlay.addWidget(self._status_label)
         self.setCentralWidget(central)
 
         # Rough initial width; height corrected after first layout pass.
-        self.resize(self.sizeHint().width() or 1200, 800)
+        self.resize(self.sizeHint().width() or 1200, 650)
 
     # ── button callbacks ──────────────────────────────────────────────────────
 
@@ -2292,7 +2302,7 @@ def main():
     # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
     window = DynoWindow(commander)
-    window.resize(1400, 1100)
+    window.resize(1400, 650)
 
     if bridge_proc is not None:
         window.set_status(f"bridge_ros2 PID {bridge_proc.pid}")
