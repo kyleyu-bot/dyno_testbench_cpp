@@ -1477,7 +1477,7 @@ class DynoWindow(QMainWindow):
         slots_outer_lay.setContentsMargins(0, 0, 0, 0)
         slots_outer_lay.setSpacing(0)
         slots_outer_lay.addWidget(slots_w)
-        slots_outer_lay.addStretch(1)
+        # spin_area added below after it is constructed
 
         # ── Spinbox rows (below sliders, full-width) ──────────────────────────
         self._spin_slots = [
@@ -1502,6 +1502,9 @@ class DynoWindow(QMainWindow):
                 row_lay.addWidget(slot)
             row_lay.addStretch()
             spin_area_lay.addWidget(row_w)
+
+        slots_outer_lay.addWidget(spin_area)
+        slots_outer_lay.addStretch(1)
 
         # ── Right panel: buttons + scripting side by side ─────────────────────
         right_w     = QWidget()
@@ -1841,7 +1844,6 @@ class DynoWindow(QMainWindow):
         central = QWidget()
         vlay    = QVBoxLayout(central)
         vlay.addWidget(splitter, 1)
-        vlay.addWidget(spin_area)
         vlay.addWidget(self._status_label)
         self.setCentralWidget(central)
 
