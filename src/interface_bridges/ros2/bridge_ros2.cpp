@@ -150,17 +150,20 @@ struct CommandState {
 
 static std::mutex      g_cmd_mutex;
 static CommandState    g_cmd_state;
+static bool            g_loop_running = false;
 
 // ── SDO request / response (written by ROS2 subscriber, executed by main loop) ─
 
 struct SdoRequest {
-    bool     pending   = false;
-    bool     is_write  = false;
-    int      slave_idx = 0;
-    uint16_t index     = 0;
-    uint8_t  subindex  = 0;
-    int      size      = 4;   // bytes: 1, 2, or 4
-    int64_t  value     = 0;   // used for writes only
+    bool     pending      = false;
+    bool     is_write     = false;
+    bool     is_pre_op    = false;  // pre_op_all / pre_op_off
+    bool     is_store_all = false;  // atomic: pre-op → write 0x26DB → return to OP
+    int      slave_idx    = 0;
+    uint16_t index        = 0;
+    uint8_t  subindex     = 0;
+    int      size         = 4;   // bytes: 1, 2, or 4
+    int64_t  value        = 0;   // for writes; for pre_op: 0=enter, 1=exit
 };
 struct SdoResponse {
     std::string op;
@@ -204,6 +207,7 @@ public:
         pub_ch1_t_ = create_publisher<std_msgs::msg::Float64>("/dyno/torque/ch1",         10);
         pub_ch2_t_ = create_publisher<std_msgs::msg::Float64>("/dyno/torque/ch2",         10);
         pub_sdo_   = create_publisher<std_msgs::msg::String>("/dyno/sdo_response",        10);
+        pub_bus_   = create_publisher<std_msgs::msg::String>("/dyno/bus_status",          10);
 
         // Command subscriber
         sub_cmd_ = create_subscription<std_msgs::msg::String>(
@@ -263,9 +267,12 @@ public:
             [this](const std_msgs::msg::String::SharedPtr msg) {
                 try {
                     const json j = json::parse(msg->data);
+                    const std::string op_str = j.value("op", "read");
                     SdoRequest req;
-                    req.pending   = true;
-                    req.is_write  = (j.value("op", "read") == "write");
+                    req.pending      = true;
+                    req.is_write     = (op_str == "write");
+                    req.is_pre_op    = (op_str == "pre_op_all" || op_str == "pre_op_off");
+                    req.is_store_all = (op_str == "store_all");
                     const std::string drv = j.value("drive", "main");
                     req.slave_idx = (drv == "dut") ? dut_soem_idx_ : drive_soem_idx_;
                     req.index     = static_cast<uint16_t>(
@@ -273,7 +280,9 @@ public:
                     req.subindex  = static_cast<uint8_t>(
                                         std::stoul(j.value("subindex", "0"), nullptr, 16));
                     req.size      = j.value("size", 4);
-                    req.value     = j.value("value", int64_t{0});
+                    req.value     = req.is_pre_op
+                                    ? (op_str == "pre_op_off" ? int64_t{1} : int64_t{0})
+                                    : j.value("value", int64_t{0});
                     std::lock_guard<std::mutex> lk(g_sdo_mutex);
                     g_sdo_req = req;
                 } catch (const std::exception& e) {
@@ -307,6 +316,20 @@ public:
         std_msgs::msg::String out;
         out.data = jr.dump();
         pub_sdo_->publish(out);
+    }
+
+    void publishBusStatus() {
+        json arr = json::array();
+        for (int i = 1; i <= ec_slavecount; ++i) {
+            json s;
+            s["idx"]  = i;
+            s["name"] = std::string(ec_slave[i].name);
+            s["al"]   = alStateName(static_cast<int>(ec_slave[i].state));
+            arr.push_back(s);
+        }
+        std_msgs::msg::String msg;
+        msg.data = arr.dump();
+        pub_bus_->publish(msg);
     }
 
     void publishTelemetry(
@@ -360,6 +383,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr  pub_ch1_t_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr  pub_ch2_t_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_sdo_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_bus_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_cmd_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_sdo_;
     int drive_soem_idx_ = 1;
@@ -752,6 +776,59 @@ int main(int argc, char** argv) {
     });
 
     loop.start();
+    g_loop_running = true;
+
+    // Safe stop/start helpers — guard against double-stop or double-start.
+    auto safe_stop  = [&]{ if ( g_loop_running) { loop.stop();  g_loop_running = false; } };
+    auto safe_start = [&]{ if (!g_loop_running) { loop.start(); g_loop_running = true;  } };
+    auto recover_bus_to_op = [&]() -> std::string {
+        ec_slave[0].state = EC_STATE_SAFE_OP;
+        ec_writestate(0);
+        int safe_chk = ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
+        if ((safe_chk & 0x0F) != EC_STATE_SAFE_OP) {
+            ec_readstate();
+            return "Not all slaves reached SAFE-OP";
+        }
+
+        // Prime process data before requesting OP — some slaves need a few
+        // exchanges before they will transition out of SAFE-OP.
+        for (int i = 0; i < 5; ++i) {
+            ec_send_processdata();
+            ec_receive_processdata(EC_TIMEOUTRET);
+        }
+
+        ec_slave[0].state = EC_STATE_OPERATIONAL;
+        ec_writestate(0);
+
+        for (int attempt = 0; attempt < 50; ++attempt) {
+            ec_send_processdata();
+            ec_receive_processdata(EC_TIMEOUTRET);
+            ec_readstate();
+
+            bool all_in_op = true;
+            for (int i = 1; i <= ec_slavecount; ++i) {
+                if ((ec_slave[i].state & 0x0F) != EC_STATE_OPERATIONAL) {
+                    all_in_op = false;
+                    break;
+                }
+            }
+            if (all_in_op) {
+                return "";
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        std::ostringstream oss;
+        oss << "Slaves still not OP:";
+        for (int i = 1; i <= ec_slavecount; ++i) {
+            if ((ec_slave[i].state & 0x0F) != EC_STATE_OPERATIONAL) {
+                oss << " [" << i << "] " << ec_slave[i].name
+                    << " state=0x" << std::hex << static_cast<int>(ec_slave[i].state);
+            }
+        }
+        return oss.str();
+    };
+
 
     // Pin the main thread (publish/command loop) to all CPUs except the ones
     // reserved for the EtherCAT RT loop, so they never compete on the same core.
@@ -795,7 +872,9 @@ int main(int argc, char** argv) {
                                 int out_enc_bits,
                                 const DriveGains& gains) -> std::string {
         json j;
-        j["al"] = alStateName(static_cast<int>(ec_slave[soem_idx].state));
+        const int al_raw = (soem_idx >= 1) ? static_cast<int>(ec_slave[soem_idx].state) : 0;
+        j["al"]     = alStateName(al_raw);
+        j["al_num"] = al_raw & 0x0F;   // numeric: INIT=1 PRE-OP=2 SAFE-OP=4 OP=8 (plottable)
         auto it = status.by_slave.find(slave_name);
         if (it != status.by_slave.end() && it->second.has_value()) {
             const auto& ds = std::any_cast<const DriveStatus&>(it->second);
@@ -875,7 +954,7 @@ int main(int argc, char** argv) {
             g_cmd_state.save_log = false;
         }
 
-        // SDO read/write — mailbox channel is separate from PDO, safe in main thread.
+        // SDO / EtherCAT state operations — all serialised with PDO via safe_stop/safe_start.
         {
             SdoRequest req;
             {
@@ -886,56 +965,117 @@ int main(int argc, char** argv) {
                 }
             }
             if (req.pending) {
-                SdoResponse resp;
-                resp.op       = req.is_write ? "write" : "read";
-                resp.index    = req.index;
-                resp.subindex = req.subindex;
-                resp.size     = req.size;
+                static constexpr int SDO_TIMEOUT_US = EC_TIMEOUTSAFE; // 20 ms
 
-                // EC_TIMEOUTSAFE = 20 ms — plenty for an operational drive.
-                static constexpr int SDO_TIMEOUT_US = EC_TIMEOUTSAFE;
-
-                if (req.slave_idx < 1) {
-                    resp.success = false;
-                    resp.error   = "Slave not present (index="
-                                   + std::to_string(req.slave_idx) + ")";
-                } else if ((ec_slave[req.slave_idx].state & 0x0F) < EC_STATE_PRE_OP) {
-                    resp.success = false;
-                    resp.error   = "Slave not mailbox-ready (state=0x"
-                                   + std::to_string(ec_slave[req.slave_idx].state & 0x0F) + ")";
-                } else {
-                    // Stop the RT PDO loop so the mailbox call is never concurrent
-                    // with ec_send_processdata / ec_receive_processdata — SOEM is
-                    // not thread-safe and concurrent calls corrupt shared state.
-                    loop.stop();
-                    uint8_t buf[8] = {};
-                    if (req.is_write) {
-                        std::memcpy(buf, &req.value, static_cast<size_t>(req.size));
-                        int rc = ec_SDOwrite(static_cast<uint16_t>(req.slave_idx),
-                                             req.index, req.subindex,
-                                             FALSE, req.size, buf, SDO_TIMEOUT_US);
-                        resp.success = (rc > 0);
-                        resp.value   = req.value;
-                        if (!resp.success)
-                            resp.error = "ec_SDOwrite failed (rc=" + std::to_string(rc) + ")";
+                if (req.is_pre_op) {
+                    // ── Pre-OP toggle ────────────────────────────────────────
+                    SdoResponse resp;
+                    resp.op = (req.value == 0) ? "pre_op_all" : "pre_op_off";
+                    if (req.value == 0) {
+                        safe_stop();
+                        ec_slave[0].state = EC_STATE_PRE_OP;
+                        ec_writestate(0);
+                        int chk = ec_statecheck(0, EC_STATE_PRE_OP, EC_TIMEOUTSTATE);
+                        ec_readstate();  // refresh ec_slave[1..N].state for publishBusStatus
+                        resp.success = ((chk & 0x0F) == EC_STATE_PRE_OP);
+                        resp.error   = resp.success ? "" : "Not all slaves reached PRE-OP";
+                        // loop stays stopped — PDO invalid in PRE-OP
                     } else {
-                        int sz = req.size;
-                        int rc = ec_SDOread(static_cast<uint16_t>(req.slave_idx),
-                                            req.index, req.subindex,
-                                            FALSE, &sz, buf, SDO_TIMEOUT_US);
-                        resp.success = (rc > 0);
-                        resp.size    = sz;
-                        if (resp.success) {
-                            int64_t v = 0;
-                            std::memcpy(&v, buf, static_cast<size_t>(sz));
-                            resp.value = v;
-                        } else {
-                            resp.error = "ec_SDOread failed (rc=" + std::to_string(rc) + ")";
-                        }
+                        const std::string op_err = recover_bus_to_op();
+                        resp.success = op_err.empty();
+                        resp.error   = op_err;
+                        safe_start();
                     }
-                    loop.start();  // resume PDO
+                    node->publishSdoResponse(resp);
+
+                } else if (req.is_store_all) {
+                    // ── Store All: pre-op → write 0x26DB → return to OP ─────
+                    SdoResponse resp;
+                    resp.op    = "store_all";
+                    resp.index = 0x26DB;
+                    safe_stop();
+                    ec_slave[0].state = EC_STATE_PRE_OP;
+                    ec_writestate(0);
+                    int pre_chk = ec_statecheck(0, EC_STATE_PRE_OP, EC_TIMEOUTSTATE);
+                    ec_readstate();  // refresh ec_slave[1..N].state
+                    if ((pre_chk & 0x0F) != EC_STATE_PRE_OP) {
+                        resp.success = false;
+                        resp.error   = "Failed to reach PRE-OP";
+                    } else if (req.slave_idx < 1) {
+                        resp.success = false;
+                        resp.error   = "Slave not present (index="
+                                     + std::to_string(req.slave_idx) + ")";
+                    } else {
+                        uint32_t magic = 0x65766173u; // "evas" — DS301 save password
+                        uint8_t  buf[4];
+                        std::memcpy(buf, &magic, 4);
+                        int rc = ec_SDOwrite(static_cast<uint16_t>(req.slave_idx),
+                                             0x26DB, 0x00, FALSE, 4, buf, SDO_TIMEOUT_US);
+                        resp.success = (rc > 0);
+                        resp.value   = magic;
+                        if (!resp.success)
+                            resp.error = "ec_SDOwrite 0x26DB failed (rc="
+                                         + std::to_string(rc) + ")";
+                    }
+                    // Return to OP regardless of SDO result, but report if recovery fails.
+                    const std::string op_err = recover_bus_to_op();
+                    if (!op_err.empty()) {
+                        if (resp.error.empty()) {
+                            resp.error = op_err;
+                        } else {
+                            resp.error += " | " + op_err;
+                        }
+                        resp.success = false;
+                    }
+                    safe_start();
+                    node->publishSdoResponse(resp);
+
+                } else {
+                    // ── Regular SDO read / write ─────────────────────────────
+                    SdoResponse resp;
+                    resp.op       = req.is_write ? "write" : "read";
+                    resp.index    = req.index;
+                    resp.subindex = req.subindex;
+                    resp.size     = req.size;
+                    if (req.slave_idx < 1) {
+                        resp.success = false;
+                        resp.error   = "Slave not present (index="
+                                       + std::to_string(req.slave_idx) + ")";
+                    } else if ((ec_slave[req.slave_idx].state & 0x0F) < EC_STATE_PRE_OP) {
+                        resp.success = false;
+                        resp.error   = "Slave not mailbox-ready (state=0x"
+                                       + std::to_string(ec_slave[req.slave_idx].state & 0x0F) + ")";
+                    } else {
+                        safe_stop();
+                        uint8_t buf[8] = {};
+                        if (req.is_write) {
+                            std::memcpy(buf, &req.value, static_cast<size_t>(req.size));
+                            int rc = ec_SDOwrite(static_cast<uint16_t>(req.slave_idx),
+                                                 req.index, req.subindex,
+                                                 FALSE, req.size, buf, SDO_TIMEOUT_US);
+                            resp.success = (rc > 0);
+                            resp.value   = req.value;
+                            if (!resp.success)
+                                resp.error = "ec_SDOwrite failed (rc=" + std::to_string(rc) + ")";
+                        } else {
+                            int sz = req.size;
+                            int rc = ec_SDOread(static_cast<uint16_t>(req.slave_idx),
+                                                req.index, req.subindex,
+                                                FALSE, &sz, buf, SDO_TIMEOUT_US);
+                            resp.success = (rc > 0);
+                            resp.size    = sz;
+                            if (resp.success) {
+                                int64_t v = 0;
+                                std::memcpy(&v, buf, static_cast<size_t>(sz));
+                                resp.value = v;
+                            } else {
+                                resp.error = "ec_SDOread failed (rc=" + std::to_string(rc) + ")";
+                            }
+                        }
+                        safe_start();
+                    }
+                    node->publishSdoResponse(resp);
                 }
-                node->publishSdoResponse(resp);
             }
         }
 
@@ -1066,6 +1206,7 @@ int main(int argc, char** argv) {
                 main_json, dut_json,
                 enc, ch1_t, ch2_t
             );
+            node->publishBusStatus();
 
             if (debug_print) {
                 // main_drive
@@ -1160,7 +1301,7 @@ int main(int argc, char** argv) {
         if (dut_present) log_state(dut_slave);
     }
 
-    loop.stop();
+    safe_stop();
     master.close();
 
     // Drain remaining log records and flush quill's async backend.
