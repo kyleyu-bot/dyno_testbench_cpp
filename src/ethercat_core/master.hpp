@@ -3,6 +3,7 @@
 #include "ethercat_core/data_types.hpp"
 #include "ethercat_core/devices/base.hpp"
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -68,7 +69,12 @@ struct MasterRuntime {
 // drive the state machine to OPERATIONAL, and tear down on close.
 class EthercatMaster {
 public:
-    explicit EthercatMaster(MasterConfig config);
+    // Factory callable supplied by the application layer.
+    // Receives a SlaveConfig and must return a heap-allocated ISlaveAdapter.
+    // Throws MasterConfigError for unrecognised kinds.
+    using AdapterFactory = std::function<std::unique_ptr<ISlaveAdapter>(const SlaveConfig&)>;
+
+    explicit EthercatMaster(MasterConfig config, AdapterFactory factory);
     ~EthercatMaster();
 
     // Non-copyable, non-movable (owns SOEM global state).
@@ -96,9 +102,10 @@ private:
     bool allSlavesInOp() const;
     std::string formatStateError() const;
 
-    MasterConfig config_;
-    MasterRuntime runtime_;
-    bool          initialized_ = false;
+    MasterConfig   config_;
+    AdapterFactory factory_;
+    MasterRuntime  runtime_;
+    bool           initialized_ = false;
 };
 
 // Human-readable AL state label (e.g., "PRE-OP", "OP", "SAFE-OP+ERR").
