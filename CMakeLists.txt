@@ -68,6 +68,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 
 # ── Project subdirectories ────────────────────────────────────────────────────
 add_subdirectory(src/ethercat_core)
+add_subdirectory(src/testbench_utils)
 add_subdirectory(src/tools)
 add_subdirectory(src/ecat_functional_tests)
 add_subdirectory(src/interface_bridges)

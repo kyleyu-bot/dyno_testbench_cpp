@@ -45,6 +45,7 @@
 #include "ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp"
 
 #include "pdo_log.hpp"
+#include "testbench_utils/function_generator.hpp"
 
 extern "C" {
 #include "ethercat.h"
@@ -931,10 +932,13 @@ int main(int argc, char** argv) {
     };
 
     RCLCPP_INFO(node->get_logger(), "Entering main loop...");
-    int debug_iter = 0;
+    int  debug_iter    = 0;
+    auto main_loop_prev = std::chrono::steady_clock::now();
 
     while (!g_shutdown.load()) {
-        const auto now      = std::chrono::steady_clock::now();
+        const auto   now        = std::chrono::steady_clock::now();
+        const double main_dt_ms = std::chrono::duration<double, std::milli>(now - main_loop_prev).count();
+        main_loop_prev          = now;
         const bool in_reset = now < reset_end;
 
         if (++debug_iter <= 3)
@@ -1270,6 +1274,17 @@ int main(int argc, char** argv) {
                 );
             }
 
+            if (debug_print) {
+                std::printf(
+                    "[timing] main_dt=%.3f ms | rt_period=%.3f ms"
+                    " | rt_cycle=%.3f ms | wakeup_lat=%.3f ms\n",
+                    main_dt_ms,
+                    static_cast<double>(stats.last_period_ns)          * 1e-6,
+                    static_cast<double>(stats.last_cycle_time_ns)      * 1e-6,
+                    static_cast<double>(stats.last_wakeup_latency_ns)  * 1e-6
+                );
+            }
+
             next_pub += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::duration<double>(pub_period));
         } catch (const std::exception& e) {
@@ -1278,7 +1293,7 @@ int main(int argc, char** argv) {
             RCLCPP_ERROR(node->get_logger(), "Publish unknown exception");
         } }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     // Shutdown: do not send any DS402 disable commands before stopping.
