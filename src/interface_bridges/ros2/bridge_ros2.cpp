@@ -781,6 +781,53 @@ int main(int argc, char** argv) {
     // Safe stop/start helpers — guard against double-stop or double-start.
     auto safe_stop  = [&]{ if ( g_loop_running) { loop.stop();  g_loop_running = false; } };
     auto safe_start = [&]{ if (!g_loop_running) { loop.start(); g_loop_running = true;  } };
+    auto recover_bus_to_op = [&]() -> std::string {
+        ec_slave[0].state = EC_STATE_SAFE_OP;
+        ec_writestate(0);
+        int safe_chk = ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
+        if ((safe_chk & 0x0F) != EC_STATE_SAFE_OP) {
+            ec_readstate();
+            return "Not all slaves reached SAFE-OP";
+        }
+
+        // Prime process data before requesting OP — some slaves need a few
+        // exchanges before they will transition out of SAFE-OP.
+        for (int i = 0; i < 5; ++i) {
+            ec_send_processdata();
+            ec_receive_processdata(EC_TIMEOUTRET);
+        }
+
+        ec_slave[0].state = EC_STATE_OPERATIONAL;
+        ec_writestate(0);
+
+        for (int attempt = 0; attempt < 50; ++attempt) {
+            ec_send_processdata();
+            ec_receive_processdata(EC_TIMEOUTRET);
+            ec_readstate();
+
+            bool all_in_op = true;
+            for (int i = 1; i <= ec_slavecount; ++i) {
+                if ((ec_slave[i].state & 0x0F) != EC_STATE_OPERATIONAL) {
+                    all_in_op = false;
+                    break;
+                }
+            }
+            if (all_in_op) {
+                return "";
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        std::ostringstream oss;
+        oss << "Slaves still not OP:";
+        for (int i = 1; i <= ec_slavecount; ++i) {
+            if ((ec_slave[i].state & 0x0F) != EC_STATE_OPERATIONAL) {
+                oss << " [" << i << "] " << ec_slave[i].name
+                    << " state=0x" << std::hex << static_cast<int>(ec_slave[i].state);
+            }
+        }
+        return oss.str();
+    };
 
 
     // Pin the main thread (publish/command loop) to all CPUs except the ones
@@ -934,15 +981,9 @@ int main(int argc, char** argv) {
                         resp.error   = resp.success ? "" : "Not all slaves reached PRE-OP";
                         // loop stays stopped — PDO invalid in PRE-OP
                     } else {
-                        ec_slave[0].state = EC_STATE_SAFE_OP;
-                        ec_writestate(0);
-                        ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
-                        ec_slave[0].state = EC_STATE_OPERATIONAL;
-                        ec_writestate(0);
-                        int chk = ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
-                        ec_readstate();  // refresh ec_slave[1..N].state for publishBusStatus
-                        resp.success = ((chk & 0x0F) == EC_STATE_OPERATIONAL);
-                        resp.error   = resp.success ? "" : "Not all slaves reached OP";
+                        const std::string op_err = recover_bus_to_op();
+                        resp.success = op_err.empty();
+                        resp.error   = op_err;
                         safe_start();
                     }
                     node->publishSdoResponse(resp);
@@ -960,6 +1001,10 @@ int main(int argc, char** argv) {
                     if ((pre_chk & 0x0F) != EC_STATE_PRE_OP) {
                         resp.success = false;
                         resp.error   = "Failed to reach PRE-OP";
+                    } else if (req.slave_idx < 1) {
+                        resp.success = false;
+                        resp.error   = "Slave not present (index="
+                                     + std::to_string(req.slave_idx) + ")";
                     } else {
                         uint32_t magic = 0x65766173u; // "evas" — DS301 save password
                         uint8_t  buf[4];
@@ -972,14 +1017,16 @@ int main(int argc, char** argv) {
                             resp.error = "ec_SDOwrite 0x26DB failed (rc="
                                          + std::to_string(rc) + ")";
                     }
-                    // Return to OP regardless of SDO result
-                    ec_slave[0].state = EC_STATE_SAFE_OP;
-                    ec_writestate(0);
-                    ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
-                    ec_slave[0].state = EC_STATE_OPERATIONAL;
-                    ec_writestate(0);
-                    ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
-                    ec_readstate();  // refresh ec_slave[1..N].state
+                    // Return to OP regardless of SDO result, but report if recovery fails.
+                    const std::string op_err = recover_bus_to_op();
+                    if (!op_err.empty()) {
+                        if (resp.error.empty()) {
+                            resp.error = op_err;
+                        } else {
+                            resp.error += " | " + op_err;
+                        }
+                        resp.success = false;
+                    }
                     safe_start();
                     node->publishSdoResponse(resp);
 
