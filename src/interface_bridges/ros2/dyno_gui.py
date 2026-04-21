@@ -1844,7 +1844,7 @@ class DynoWindow(QMainWindow):
         # and right-side panels share the same bottom edge.
         _content_h = right_inner.sizeHint().height()
         slots_w.setMinimumHeight(_content_h)
-        self._field_list.setMinimumHeight(_content_h)
+        self._field_list.setMinimumHeight(max(200, _content_h - 15))
 
         # ── Splitter ───────────────────────────────────────────────────────────
         splitter = QSplitter(Qt.Horizontal)
@@ -1854,7 +1854,7 @@ class DynoWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setFixedHeight(_content_h)
+        splitter.setFixedHeight(max(200, _content_h - 15))
 
         # ── Status label ───────────────────────────────────────────────────────
         self._status_label = QLabel("bridge_ros2 starting…")
@@ -1871,7 +1871,7 @@ class DynoWindow(QMainWindow):
         self.setCentralWidget(central)
 
         # Rough initial width; height corrected after first layout pass.
-        self.resize(self.sizeHint().width() or 1200, 650)
+        self.resize(self.sizeHint().width() or 1200, 360)
 
     # ── button callbacks ──────────────────────────────────────────────────────
 
@@ -2302,7 +2302,7 @@ def main():
     # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
     window = DynoWindow(commander)
-    window.resize(1400, 650)
+    window.resize(1400, 360)
 
     if bridge_proc is not None:
         window.set_status(f"bridge_ros2 PID {bridge_proc.pid}")
