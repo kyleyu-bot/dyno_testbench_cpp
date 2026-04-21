@@ -7,11 +7,6 @@ extern "C" {
 
 #include <nlohmann/json.hpp>
 
-#include "ethercat_core/devices/beckhoff/el2004/adapter.hpp"
-#include "ethercat_core/devices/beckhoff/el3002/adapter.hpp"
-#include "ethercat_core/devices/beckhoff/el5032/adapter.hpp"
-#include "ethercat_core/devices/motor_drives/Novanta/Everest/adapter.hpp"
-#include "ethercat_core/devices/motor_drives/Novanta/Volcano/adapter.hpp"
 
 #include <chrono>
 #include <cstring>
@@ -82,30 +77,6 @@ MasterConfig loadTopology(const std::string& path) {
     return cfg;
 }
 
-// ── Adapter factory ───────────────────────────────────────────────────────────
-
-static std::unique_ptr<ISlaveAdapter> buildAdapter(const SlaveConfig& cfg) {
-    SlaveIdentity id{cfg.name, cfg.position, cfg.vendor_id, cfg.product_code};
-
-    if (cfg.kind == "everest") {
-        return std::make_unique<novanta::everest::NovantaEverestAdapter>(id);
-    }
-    if (cfg.kind == "volcano") {
-        return std::make_unique<novanta::volcano::NovantaVolcanoAdapter>(id);
-    }
-    if (cfg.kind == "EL2004") {
-        return std::make_unique<beckhoff::el2004::El2004Adapter>(id);
-    }
-    if (cfg.kind == "EL3002" || cfg.kind == "ELM3002") {
-        return std::make_unique<beckhoff::el3002::El3002Adapter>(id);
-    }
-    if (cfg.kind == "EL5032") {
-        return std::make_unique<beckhoff::el5032::El5032Adapter>(id);
-    }
-
-    throw MasterConfigError("Unsupported slave kind '" + cfg.kind + "' for '" + cfg.name + "'.");
-}
-
 // ── SDO helpers ───────────────────────────────────────────────────────────────
 
 // Read a single SDO and decode it according to spec.  Returns the value as a
@@ -140,8 +111,8 @@ static float readSdoFloat(int soem_idx, const SdoReadSpec& spec) {
 
 // ── EthercatMaster ────────────────────────────────────────────────────────────
 
-EthercatMaster::EthercatMaster(MasterConfig config)
-    : config_(std::move(config))
+EthercatMaster::EthercatMaster(MasterConfig config, EthercatMaster::AdapterFactory factory)
+    : config_(std::move(config)), factory_(std::move(factory))
 {}
 
 EthercatMaster::~EthercatMaster() {
@@ -199,7 +170,7 @@ MasterRuntime& EthercatMaster::initialize() {
             }
             throw;
         }
-        runtime_.adapters[sc.name] = buildAdapter(sc);
+        runtime_.adapters[sc.name] = factory_(sc);
         runtime_.slave_index[sc.name] = sc.position + 1;  // SOEM is 1-based
     }
 
@@ -385,16 +356,7 @@ void EthercatMaster::validatePdoSizes(
 void EthercatMaster::readStartupParams(
     const SlaveConfig& cfg, int soem_idx, ISlaveAdapter& adapter)
 {
-    // Only Novanta adapters expose startupReadSpecs(); other adapters skip this.
-    std::unordered_map<std::string, SdoReadSpec> specs;
-
-    // Use RTTI-free duck typing: attempt casts for known types.
-    if (auto* ea = dynamic_cast<novanta::everest::NovantaEverestAdapter*>(&adapter)) {
-        specs = ea->startupReadSpecs();
-    } else if (auto* va = dynamic_cast<novanta::volcano::NovantaVolcanoAdapter*>(&adapter)) {
-        specs = va->startupReadSpecs();
-    }
-
+    const auto specs = adapter.startupReadSpecs();
     if (specs.empty()) return;
 
     auto& params = runtime_.startup_params[cfg.name];
@@ -419,26 +381,16 @@ void EthercatMaster::readStartupParams(
         params[key] = val;
     }
 
-    // Compute gear ratio from sensor_ratio (0x2364).
     auto sr_it = params.find("sensor_ratio");
     if (sr_it != params.end()) {
-        if (auto* ea = dynamic_cast<novanta::everest::NovantaEverestAdapter*>(&adapter)) {
-            ea->computeGearRatio(sr_it->second);
-        } else if (auto* va = dynamic_cast<novanta::volcano::NovantaVolcanoAdapter*>(&adapter)) {
-            va->computeGearRatio(sr_it->second);
-        }
+        adapter.computeGearRatio(sr_it->second);
     }
 
-    // Apply position and velocity limits (0x21E8, 0x21EA, 0x21EB).
     auto vel_it     = params.find("max_velocity_abs");
     auto min_pos_it = params.find("min_position");
     auto max_pos_it = params.find("max_position");
     if (vel_it != params.end() && min_pos_it != params.end() && max_pos_it != params.end()) {
-        if (auto* ea = dynamic_cast<novanta::everest::NovantaEverestAdapter*>(&adapter)) {
-            ea->applyLimits(vel_it->second, min_pos_it->second, max_pos_it->second);
-        } else if (auto* va = dynamic_cast<novanta::volcano::NovantaVolcanoAdapter*>(&adapter)) {
-            va->applyLimits(vel_it->second, min_pos_it->second, max_pos_it->second);
-        }
+        adapter.applyLimits(vel_it->second, min_pos_it->second, max_pos_it->second);
     }
 }
 

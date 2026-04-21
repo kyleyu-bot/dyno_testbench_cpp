@@ -27,9 +27,7 @@ public:
         int64_t cycle_time_ns = 0, int64_t dc_error_ns = 0
     ) override;
 
-    // Returns the SDO read specs that should be read during master startup.
-    // Keys match the field names in Command for convenient direct assignment.
-    static std::unordered_map<std::string, SdoReadSpec> startupReadSpecs();
+    std::unordered_map<std::string, SdoReadSpec> startupReadSpecs() const override;
 
     uint16_t lastStatusWord() const { return last_status_word_; }
 
@@ -37,7 +35,7 @@ public:
 
     // Computes and stores gear_ratio = 1 / sensor_ratio.
     // Throws std::runtime_error if sensor_ratio is too close to zero.
-    void computeGearRatio(float sensor_ratio) {
+    void computeGearRatio(float sensor_ratio) override {
         if (std::abs(sensor_ratio) < 1e-4f) {
             throw std::runtime_error(
                 "Improper gear ratio for slave '" + identity_.name +
@@ -52,7 +50,7 @@ public:
     // min_pos_raw   : 0x21EA raw int32 (read as float)
     // max_pos_raw   : 0x21EB raw int32 (read as float)
     // If both position values are 0, limits are set to int32 min/max.
-    void applyLimits(float max_vel_rev_s, float min_pos_raw, float max_pos_raw) {
+    void applyLimits(float max_vel_rev_s, float min_pos_raw, float max_pos_raw) override {
         max_velocity_abs_ = max_vel_rev_s * 1000.0f;
         const int32_t lo = static_cast<int32_t>(min_pos_raw);
         const int32_t hi = static_cast<int32_t>(max_pos_raw);

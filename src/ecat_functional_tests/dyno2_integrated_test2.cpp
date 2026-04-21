@@ -30,6 +30,7 @@
 #include "ethercat_core/data_types.hpp"
 #include "ethercat_core/loop.hpp"
 #include "ethercat_core/master.hpp"
+#include "ethercat_core/default_adapter_factory.hpp"
 #include "ethercat_core/devices/beckhoff/el2004/adapter.hpp"
 #include "ethercat_core/devices/beckhoff/el2004/data_types.hpp"
 #include "ethercat_core/devices/beckhoff/el3002/adapter.hpp"
@@ -346,7 +347,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    EthercatMaster master(cfg);
+    EthercatMaster master(cfg, ethercat_core::makeDefaultAdapterFactory());
     MasterRuntime* rt = nullptr;
     try {
         rt = &master.initialize();
