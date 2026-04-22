@@ -225,7 +225,10 @@ void EthercatLoop::runForever() {
         }
 
         if (cycle_callback_) {
-            cycle_callback_(cycle_status, cycle_stats);
+            SystemCommand next = cycle_callback_(cycle_status, cycle_stats);
+            std::lock_guard<std::mutex> lk(mutex_);
+            next.seq = stats_.cycle_count;
+            pending_command_ = std::move(next);
         }
 
         prev_start_ns = start_ns;
