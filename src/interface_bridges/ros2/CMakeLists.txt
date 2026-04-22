@@ -43,10 +43,15 @@ set(SOEM_INCLUDE_DIRS
 set(JSON_INCLUDE_DIR "${DYNO_BUILD_DIR}/_deps/nlohmann_json-src/include")
 
 # ── bridge_ros2 executable ────────────────────────────────────────────────────
-add_executable(bridge_ros2 bridge_ros2.cpp)
+add_executable(bridge_ros2
+    bridge_ros2.cpp
+    "${DYNO_ROOT}/src/testbenches/dual_novanta_testbench/dual_novanta_testbench.cpp"
+)
 
 target_include_directories(bridge_ros2 PRIVATE
     "${DYNO_ROOT}/src"
+    "${DYNO_ROOT}/src/testbenches"
+    "${DYNO_ROOT}/src/interface_bridges/ros2"
     ${SOEM_INCLUDE_DIRS}
     ${JSON_INCLUDE_DIR}
 )
