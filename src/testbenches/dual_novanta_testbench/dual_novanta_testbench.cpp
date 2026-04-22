@@ -1,5 +1,7 @@
 #include "dual_novanta_testbench.hpp"
 
+#include "testbench_utils/function_generator.hpp"
+
 #include "ethercat_core/devices/beckhoff/el2004/data_types.hpp"
 #include "ethercat_core/devices/beckhoff/el3002/data_types.hpp"
 #include "ethercat_core/devices/beckhoff/el5032/data_types.hpp"
@@ -78,44 +80,30 @@ DriveGains DualNovantaTestbench::extractGains_(
 void DualNovantaTestbench::extractAndSeedGains(
     MasterRuntime& rt,
     CommandState&  cmd_state,
-    std::mutex&    cmd_mutex,
-    rclcpp::Logger logger)
+    std::mutex&    cmd_mutex)
 {
     const DriveGains main_gains = extractGains_(rt, drive_slave_);
     const DriveGains dut_gains  = extractGains_(rt, dut_slave_);
 
-    {
-        std::lock_guard<std::mutex> lk(cmd_mutex);
-        cmd_state.main_torque_kp      = main_gains.torque_kp;
-        cmd_state.main_torque_max_out = main_gains.torque_loop_max_output;
-        cmd_state.main_torque_min_out = main_gains.torque_loop_min_output;
-        cmd_state.main_vel_kp         = main_gains.velocity_loop_kp;
-        cmd_state.main_vel_ki         = main_gains.velocity_loop_ki;
-        cmd_state.main_vel_kd         = main_gains.velocity_loop_kd;
-        cmd_state.main_pos_kp         = main_gains.position_loop_kp;
-        cmd_state.main_pos_ki         = main_gains.position_loop_ki;
-        cmd_state.main_pos_kd         = main_gains.position_loop_kd;
-        cmd_state.dut_torque_kp       = dut_gains.torque_kp;
-        cmd_state.dut_torque_max_out  = dut_gains.torque_loop_max_output;
-        cmd_state.dut_torque_min_out  = dut_gains.torque_loop_min_output;
-        cmd_state.dut_vel_kp          = dut_gains.velocity_loop_kp;
-        cmd_state.dut_vel_ki          = dut_gains.velocity_loop_ki;
-        cmd_state.dut_vel_kd          = dut_gains.velocity_loop_kd;
-        cmd_state.dut_pos_kp          = dut_gains.position_loop_kp;
-        cmd_state.dut_pos_ki          = dut_gains.position_loop_ki;
-        cmd_state.dut_pos_kd          = dut_gains.position_loop_kd;
-    }
-
-    RCLCPP_INFO(logger,
-        "[main_drive] vel_kp=%.4f vel_ki=%.4f torque_kp=%.4f",
-        static_cast<double>(main_gains.velocity_loop_kp),
-        static_cast<double>(main_gains.velocity_loop_ki),
-        static_cast<double>(main_gains.torque_kp));
-    RCLCPP_INFO(logger,
-        "[dut]        vel_kp=%.4f vel_ki=%.4f torque_kp=%.4f",
-        static_cast<double>(dut_gains.velocity_loop_kp),
-        static_cast<double>(dut_gains.velocity_loop_ki),
-        static_cast<double>(dut_gains.torque_kp));
+    std::lock_guard<std::mutex> lk(cmd_mutex);
+    cmd_state.main_torque_kp      = main_gains.torque_kp;
+    cmd_state.main_torque_max_out = main_gains.torque_loop_max_output;
+    cmd_state.main_torque_min_out = main_gains.torque_loop_min_output;
+    cmd_state.main_vel_kp         = main_gains.velocity_loop_kp;
+    cmd_state.main_vel_ki         = main_gains.velocity_loop_ki;
+    cmd_state.main_vel_kd         = main_gains.velocity_loop_kd;
+    cmd_state.main_pos_kp         = main_gains.position_loop_kp;
+    cmd_state.main_pos_ki         = main_gains.position_loop_ki;
+    cmd_state.main_pos_kd         = main_gains.position_loop_kd;
+    cmd_state.dut_torque_kp       = dut_gains.torque_kp;
+    cmd_state.dut_torque_max_out  = dut_gains.torque_loop_max_output;
+    cmd_state.dut_torque_min_out  = dut_gains.torque_loop_min_output;
+    cmd_state.dut_vel_kp          = dut_gains.velocity_loop_kp;
+    cmd_state.dut_vel_ki          = dut_gains.velocity_loop_ki;
+    cmd_state.dut_vel_kd          = dut_gains.velocity_loop_kd;
+    cmd_state.dut_pos_kp          = dut_gains.position_loop_kp;
+    cmd_state.dut_pos_ki          = dut_gains.position_loop_ki;
+    cmd_state.dut_pos_kd          = dut_gains.position_loop_kd;
 }
 
 // ── makeCallback ──────────────────────────────────────────────────────────────

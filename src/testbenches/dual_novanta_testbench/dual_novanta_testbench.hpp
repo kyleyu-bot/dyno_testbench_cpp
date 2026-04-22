@@ -7,8 +7,6 @@
 #include "ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp"
 #include "pdo_log.hpp"
 
-#include <rclcpp/rclcpp.hpp>
-
 #include <chrono>
 #include <mutex>
 #include <string>
@@ -128,8 +126,7 @@ public:
     void extractAndSeedGains(
         ethercat_core::MasterRuntime& rt,
         CommandState& cmd_state,
-        std::mutex&   cmd_mutex,
-        rclcpp::Logger logger
+        std::mutex&   cmd_mutex
     );
 
     // Returns the CycleCallback for loop.setCycleCallback().

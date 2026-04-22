@@ -41,7 +41,6 @@
 #include "ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp"
 
 #include "pdo_log.hpp"
-#include "testbench_utils/function_generator.hpp"
 #include "dual_novanta_testbench/dual_novanta_testbench.hpp"
 
 extern "C" {
@@ -492,7 +491,20 @@ int main(int argc, char** argv) {
         drive_soem_idx, dut_soem_idx,
         main_out_enc_bits, dut_out_enc_bits
     );
-    testbench.extractAndSeedGains(*rt, g_cmd_state, g_cmd_mutex, node->get_logger());
+    testbench.extractAndSeedGains(*rt, g_cmd_state, g_cmd_mutex);
+    {
+        std::lock_guard<std::mutex> lk(g_cmd_mutex);
+        RCLCPP_INFO(node->get_logger(),
+            "[main_drive] vel_kp=%.4f vel_ki=%.4f torque_kp=%.4f",
+            static_cast<double>(g_cmd_state.main_vel_kp),
+            static_cast<double>(g_cmd_state.main_vel_ki),
+            static_cast<double>(g_cmd_state.main_torque_kp));
+        RCLCPP_INFO(node->get_logger(),
+            "[dut]        vel_kp=%.4f vel_ki=%.4f torque_kp=%.4f",
+            static_cast<double>(g_cmd_state.dut_vel_kp),
+            static_cast<double>(g_cmd_state.dut_vel_ki),
+            static_cast<double>(g_cmd_state.dut_torque_kp));
+    }
 
     // Ring buffer: RT callback pushes one record per cycle; drain thread writes to CSV.
     dyno::PdoLogBuffer<200> log_buf;

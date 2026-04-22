@@ -13,7 +13,7 @@ FunctionGenerator::FunctionGenerator()
 void FunctionGenerator::reset()
 {
     mode_        = FunctionGeneratorMode::OFF;
-    amplitude_   = 1.0;
+    amplitude_   = 0.0;
     frequency_   = 1.0;
     offset_      = 0.0;
     phase_       = 0.0;
