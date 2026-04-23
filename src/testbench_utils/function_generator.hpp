@@ -4,7 +4,7 @@
 
 namespace testbench_utils {
 
-enum class FunctionGeneratorMode {
+enum class WaveformType {
     OFF,
     DC,
     SINE,
@@ -15,6 +15,14 @@ enum class FunctionGeneratorMode {
     CHIRP_LINEAR,
 };
 
+enum class ControlType : int {
+    NONE     = 0,
+    VELOCITY = 1,
+    POSITION = 2,
+    TORQUE   = 3,
+    CURRENT  = 4,
+};
+
 class FunctionGenerator {
 public:
     FunctionGenerator();
@@ -23,11 +31,17 @@ public:
     // Recomputes cached value, derivative, and integral. No-op when stopped.
     void update(double dt);
 
-    // Zero ALL state and ALL parameters, clear stopped flag, mode → OFF.
+    // Zero ALL state and ALL parameters, clear stopped flag, waveform_type → OFF.
     void reset();
 
+    // Start/restart generation: resets time state and clears stopped_.
+    // Parameters (amplitude, frequency, etc.) are preserved.
+    void enable();
+
+    bool isEnabled() const { return !stopped_; }
+
     // Pause waveform output.
-    //   full_reset = false : freeze — output holds at last value, all parameters preserved.
+    //   full_reset = false : stopped_ = true, output zeroed, parameters + t_elapsed_ preserved.
     //   full_reset = true  : calls reset(), zeros everything.
     void stop(bool full_reset = false);
 
@@ -36,8 +50,11 @@ public:
     double getValueDDot()     const { return value_ddot_; }
     double getValueIntegral() const { return integral_; }
 
-    void                  setMode(FunctionGeneratorMode m) { mode_ = m; }
-    FunctionGeneratorMode getMode()                  const { return mode_; }
+    void         setWaveformType(WaveformType w)   { waveform_type_ = w; }
+    WaveformType getWaveformType()           const { return waveform_type_; }
+
+    void        setControlType(ControlType c)      { control_type_ = c; }
+    ControlType getControlType()             const { return control_type_; }
 
     void   setAmplitude(double v) { amplitude_ = v; }
     double getAmplitude()   const { return amplitude_; }
@@ -60,7 +77,8 @@ public:
     void setChirpDuration(double v)      { chirp_dur_    = v; }
 
 private:
-    FunctionGeneratorMode mode_       = FunctionGeneratorMode::OFF;
+    WaveformType  waveform_type_ = WaveformType::OFF;
+    ControlType   control_type_  = ControlType::NONE;
     double amplitude_   = 1.0;
     double frequency_   = 1.0;
     double offset_      = 0.0;

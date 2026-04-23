@@ -184,6 +184,27 @@ public:
                     g_cmd_state.zero_torque_ch1    |= j.value("zero_torque_ch1", false);
                     g_cmd_state.zero_torque_ch2    |= j.value("zero_torque_ch2", false);
                     g_cmd_state.save_log           |= j.value("save_log",        false);
+                    // Function generator config
+                    g_cmd_state.main_fg_enable       = j.value("main_fg_enable",       false);
+                    g_cmd_state.main_fg_waveform     = j.value("main_fg_waveform",     g_cmd_state.main_fg_waveform);
+                    g_cmd_state.main_fg_control_type = j.value("main_fg_control_type", g_cmd_state.main_fg_control_type);
+                    g_cmd_state.main_fg_amplitude    = j.value("main_fg_amplitude",    g_cmd_state.main_fg_amplitude);
+                    g_cmd_state.main_fg_frequency    = j.value("main_fg_frequency",    g_cmd_state.main_fg_frequency);
+                    g_cmd_state.main_fg_offset       = j.value("main_fg_offset",       g_cmd_state.main_fg_offset);
+                    g_cmd_state.main_fg_phase        = j.value("main_fg_phase",        g_cmd_state.main_fg_phase);
+                    g_cmd_state.dut_fg_enable        = j.value("dut_fg_enable",        false);
+                    g_cmd_state.dut_fg_waveform      = j.value("dut_fg_waveform",      g_cmd_state.dut_fg_waveform);
+                    g_cmd_state.dut_fg_control_type  = j.value("dut_fg_control_type",  g_cmd_state.dut_fg_control_type);
+                    g_cmd_state.dut_fg_amplitude     = j.value("dut_fg_amplitude",     g_cmd_state.dut_fg_amplitude);
+                    g_cmd_state.dut_fg_frequency     = j.value("dut_fg_frequency",     g_cmd_state.dut_fg_frequency);
+                    g_cmd_state.dut_fg_offset        = j.value("dut_fg_offset",        g_cmd_state.dut_fg_offset);
+                    g_cmd_state.dut_fg_phase         = j.value("dut_fg_phase",         g_cmd_state.dut_fg_phase);
+                    g_cmd_state.main_fg_chirp_f_low  = j.value("main_fg_chirp_f_low",  g_cmd_state.main_fg_chirp_f_low);
+                    g_cmd_state.main_fg_chirp_f_high = j.value("main_fg_chirp_f_high", g_cmd_state.main_fg_chirp_f_high);
+                    g_cmd_state.main_fg_chirp_dur    = j.value("main_fg_chirp_dur",    g_cmd_state.main_fg_chirp_dur);
+                    g_cmd_state.dut_fg_chirp_f_low   = j.value("dut_fg_chirp_f_low",   g_cmd_state.dut_fg_chirp_f_low);
+                    g_cmd_state.dut_fg_chirp_f_high  = j.value("dut_fg_chirp_f_high",  g_cmd_state.dut_fg_chirp_f_high);
+                    g_cmd_state.dut_fg_chirp_dur     = j.value("dut_fg_chirp_dur",     g_cmd_state.dut_fg_chirp_dur);
                 } catch (...) {
                     RCLCPP_WARN(get_logger(), "Failed to parse /dyno/command JSON");
                 }
@@ -810,9 +831,9 @@ int main(int argc, char** argv) {
             cmd_dut_gains.position_loop_kd        = cmd.dut_pos_kd;
 
             const std::string main_json = DualNovantaTestbench::makeDriveJson(
-                drive_slave, drive_soem_idx, cmd.main_speed, cur_status, main_out_enc_bits, cmd_main_gains);
+                drive_slave, drive_soem_idx, cur_status, main_out_enc_bits, cmd_main_gains);
             const std::string dut_json = DualNovantaTestbench::makeDriveJson(
-                dut_slave, dut_soem_idx, cmd.dut_speed, cur_status, dut_out_enc_bits, cmd_dut_gains);
+                dut_slave, dut_soem_idx, cur_status, dut_out_enc_bits, cmd_dut_gains);
 
             uint32_t enc = 0;
             auto enc_it = cur_status.by_slave.find(encoder_slave);

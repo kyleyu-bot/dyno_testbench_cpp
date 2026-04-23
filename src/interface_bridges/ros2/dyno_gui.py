@@ -770,8 +770,8 @@ class SliderSlot(QGroupBox):
         self._float_spin = QDoubleSpinBox()
         self._float_spin.setKeyboardTracking(False)
         self._float_spin.setRange(0.0, 20.0)
-        self._float_spin.setSingleStep(0.001)
-        self._float_spin.setDecimals(3)
+        self._float_spin.setSingleStep(0.000001)
+        self._float_spin.setDecimals(6)
         self._float_spin.setValue(0.0)
         self._float_spin.hide()
         self._committed_float: float = 0.0
@@ -837,7 +837,7 @@ class SliderSlot(QGroupBox):
 
     def _on_float_changed(self, v: float):
         self._committed_float = v
-        self._val_label.setText(f"{v:.3f}")
+        self._val_label.setText(f"{v:.6f}")
 
     # ── float mode ────────────────────────────────────────────────────────────
 
@@ -853,7 +853,7 @@ class SliderSlot(QGroupBox):
         self._float_spin.setValue(default)
         self._committed_float = default
         self._float_spin.blockSignals(False)
-        self._val_label.setText(f"{default:.3f}")
+        self._val_label.setText(f"{default:.6f}")
         self._float_spin.show()
 
     def clear_float_mode(self):
@@ -1021,7 +1021,7 @@ class SpinboxSlot(QGroupBox):
 
         self._spin = QDoubleSpinBox()
         self._spin.setRange(-1e9, 1e9)
-        self._spin.setDecimals(3)
+        self._spin.setDecimals(4)
         self._spin.setSingleStep(1.0)
         self._spin.setValue(0.0)
         self._spin.setKeyboardTracking(False)
@@ -1065,8 +1065,8 @@ class SpinboxSlot(QGroupBox):
                 lo, hi, default = result
                 is_gain = key in GAIN_FIELDS
                 self._spin.blockSignals(True)
-                self._spin.setDecimals(3 if is_gain else 1)
-                self._spin.setSingleStep(0.001 if is_gain else 1.0)
+                self._spin.setDecimals(6 if is_gain else 3)
+                self._spin.setSingleStep(0.000001 if is_gain else 0.001)
                 self._spin.setRange(lo, hi)
                 self._spin.setValue(float(default))
                 self._committed = float(default)
@@ -1424,6 +1424,12 @@ class DynoWindow(QMainWindow):
         self._script_running = False
         self._ch1_scale: int = 200   # Nm — matches El3002Adapter ch1 default
         self._ch2_scale: int = 20    # Nm — matches El3002Adapter ch2 default
+
+        def _fg_default():
+            return {"enable": False, "waveform": 0, "control_type": 0,
+                    "amplitude": 0.0, "frequency": 1.0, "offset": 0.0, "phase": 0.0,
+                    "chirp_f_low": 0.1, "chirp_f_high": 10.0, "chirp_dur": 10.0}
+        self._fg_state       = {"main": _fg_default(), "dut": _fg_default()}
 
         self.setWindowTitle("Dyno Control")
         self._build_ui()
@@ -1826,12 +1832,174 @@ class DynoWindow(QMainWindow):
         self._bus_status_panel.setReadOnly(True)
         _bus_font = QFont("Monospace"); _bus_font.setPointSize(8)
         self._bus_status_panel.setFont(_bus_font)
-        self._bus_status_panel.setMinimumHeight(60)
+        self._bus_status_panel.setFixedHeight(200)
         self._bus_status_panel.setLineWrapMode(QTextEdit.NoWrap)
         self._bus_status_panel.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._bus_status_panel.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._bus_status_panel.setPlaceholderText("(waiting for bridge)")
-        ecat_lay.addWidget(self._bus_status_panel, 1)
+        ecat_lay.addWidget(self._bus_status_panel)
+
+        # ── Function Generator ────────────────────────────────────────────────
+        fg_group = QGroupBox("Function Generator")
+        fg_lay   = QVBoxLayout(fg_group)
+        fg_lay.setSpacing(3)
+        fg_lay.setContentsMargins(6, 6, 6, 6)
+
+        # Drive selector + Enable checkbox
+        fg_head = QHBoxLayout()
+        self._fg_drive_combo = QComboBox()
+        self._fg_drive_combo.addItem("Main", "main")
+        self._fg_drive_combo.addItem("DUT",  "dut")
+        fg_head.addWidget(self._fg_drive_combo)
+        self._fg_enable_chk = QCheckBox("Enable FG")
+        fg_head.addWidget(self._fg_enable_chk)
+        fg_lay.addLayout(fg_head)
+
+        # Control type
+        fg_ct = QHBoxLayout()
+        fg_ct.addWidget(QLabel("Control:"))
+        self._fg_ctrl_combo = QComboBox()
+        for _name, _val in [("None", 0), ("Velocity", 1), ("Position", 2),
+                             ("Torque", 3), ("Current", 4)]:
+            self._fg_ctrl_combo.addItem(_name, _val)
+        fg_ct.addWidget(self._fg_ctrl_combo)
+        fg_lay.addLayout(fg_ct)
+
+        # Changing control type → auto-update the DS402 mode combo for the
+        # selected drive so the JSON main_mode always agrees with apply_fg.
+        _FG_CT_TO_MODE_COMBO = {
+            1: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 9),   # Velocity → CSV
+            2: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 8),   # Position → CSP
+            3: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 10),  # Torque   → CST
+            4: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 10),  # Current  → CST
+        }
+
+        def _fg_on_ctrl_type(idx):
+            if idx not in _FG_CT_TO_MODE_COMBO:
+                return  # NONE (0) — leave mode combo unchanged
+            mode_idx = _FG_CT_TO_MODE_COMBO[idx]
+            drive = self._fg_drive_combo.currentData()
+            combo = self._main_mode_combo if drive == "main" else self._dut_mode_combo
+            combo.setCurrentIndex(mode_idx)
+
+        def _fg_on_enable(state):
+            if state:  # on check — sync mode combo to current control type
+                _fg_on_ctrl_type(self._fg_ctrl_combo.currentIndex())
+
+        self._fg_ctrl_combo.currentIndexChanged.connect(_fg_on_ctrl_type)
+        self._fg_enable_chk.stateChanged.connect(_fg_on_enable)
+
+        # Waveform
+        fg_wf = QHBoxLayout()
+        fg_wf.addWidget(QLabel("Waveform:"))
+        self._fg_wf_combo = QComboBox()
+        for _name in ["OFF", "DC", "Sine", "Square", "Triangle",
+                      "Sawtooth", "Noise", "Chirp"]:
+            self._fg_wf_combo.addItem(_name)
+        fg_wf.addWidget(self._fg_wf_combo)
+        fg_lay.addLayout(fg_wf)
+
+        # Parameter rows — shown/hidden based on waveform
+        def _fg_param_row(label, lo, hi, decimals, step, suffix=""):
+            w   = QWidget()
+            row = QHBoxLayout(w)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(4)
+            lbl = QLabel(label)
+            lbl.setFixedWidth(62)
+            sb  = QDoubleSpinBox()
+            sb.setRange(lo, hi)
+            sb.setDecimals(decimals)
+            sb.setSingleStep(step)
+            sb.setKeyboardTracking(False)
+            if suffix:
+                sb.setSuffix(suffix)
+            row.addWidget(lbl)
+            row.addWidget(sb)
+            return w, sb
+
+        self._fg_amp_row,          self._fg_amp_spin          = _fg_param_row("Amplitude:", 0,      1e6,    3, 1.0)
+        self._fg_freq_row,         self._fg_freq_spin         = _fg_param_row("Frequency:", 0,      1e4,    3, 0.1,  " Hz")
+        self._fg_off_row,          self._fg_off_spin          = _fg_param_row("Offset:",    -1e6,   1e6,    3, 0.1)
+        self._fg_phase_row,        self._fg_phase_spin        = _fg_param_row("Phase:",     -6.2832, 6.2832, 4, 0.01, " rad")
+        self._fg_chirp_f_low_row,  self._fg_chirp_f_low_spin  = _fg_param_row("f start:",  0.001,  1e4,    3, 0.1,  " Hz")
+        self._fg_chirp_f_high_row, self._fg_chirp_f_high_spin = _fg_param_row("f end:",    0.001,  1e4,    3, 0.1,  " Hz")
+        self._fg_chirp_dur_row,    self._fg_chirp_dur_spin    = _fg_param_row("Duration:", 0.1,    1e4,    1, 1.0,  " s")
+
+        for _w in (self._fg_amp_row, self._fg_freq_row, self._fg_off_row,
+                   self._fg_phase_row, self._fg_chirp_f_low_row,
+                   self._fg_chirp_f_high_row, self._fg_chirp_dur_row):
+            fg_lay.addWidget(_w)
+
+        _FG_PARAMS_VISIBLE = {
+            0: [],
+            1: ["offset"],
+            2: ["amplitude", "frequency", "offset", "phase"],
+            3: ["amplitude", "frequency", "offset", "phase"],
+            4: ["amplitude", "frequency", "offset", "phase"],
+            5: ["amplitude", "frequency", "offset", "phase"],
+            6: ["amplitude", "offset"],
+            7: ["amplitude", "chirp_f_low", "chirp_f_high", "chirp_dur", "offset", "phase"],
+        }
+        _fg_param_map = {
+            "amplitude":   self._fg_amp_row,
+            "frequency":   self._fg_freq_row,
+            "offset":      self._fg_off_row,
+            "phase":       self._fg_phase_row,
+            "chirp_f_low": self._fg_chirp_f_low_row,
+            "chirp_f_high":self._fg_chirp_f_high_row,
+            "chirp_dur":   self._fg_chirp_dur_row,
+        }
+
+        def _fg_update_params(wf_idx):
+            visible = _FG_PARAMS_VISIBLE.get(wf_idx, [])
+            for _k, _w in _fg_param_map.items():
+                _w.setVisible(_k in visible)
+
+        self._fg_wf_combo.currentIndexChanged.connect(_fg_update_params)
+        _fg_update_params(0)
+
+        # Drive switch — save current drive state, load new drive state
+        def _fg_save_current():
+            drive = self._fg_drive_combo.currentData()
+            st = self._fg_state[drive]
+            st["enable"]       = self._fg_enable_chk.isChecked()
+            st["waveform"]     = self._fg_wf_combo.currentIndex()
+            st["control_type"] = self._fg_ctrl_combo.currentIndex()
+            st["amplitude"]    = self._fg_amp_spin.value()
+            st["frequency"]    = self._fg_freq_spin.value()
+            st["offset"]       = self._fg_off_spin.value()
+            st["phase"]        = self._fg_phase_spin.value()
+            st["chirp_f_low"]  = self._fg_chirp_f_low_spin.value()
+            st["chirp_f_high"] = self._fg_chirp_f_high_spin.value()
+            st["chirp_dur"]    = self._fg_chirp_dur_spin.value()
+
+        def _fg_load(drive):
+            st = self._fg_state[drive]
+            for _w in (self._fg_enable_chk, self._fg_wf_combo, self._fg_ctrl_combo):
+                _w.blockSignals(True)
+            self._fg_enable_chk.setChecked(st["enable"])
+            self._fg_wf_combo.setCurrentIndex(st["waveform"])
+            self._fg_ctrl_combo.setCurrentIndex(st["control_type"])
+            self._fg_amp_spin.setValue(st["amplitude"])
+            self._fg_freq_spin.setValue(st["frequency"])
+            self._fg_off_spin.setValue(st["offset"])
+            self._fg_phase_spin.setValue(st["phase"])
+            self._fg_chirp_f_low_spin.setValue(st["chirp_f_low"])
+            self._fg_chirp_f_high_spin.setValue(st["chirp_f_high"])
+            self._fg_chirp_dur_spin.setValue(st["chirp_dur"])
+            for _w in (self._fg_enable_chk, self._fg_wf_combo, self._fg_ctrl_combo):
+                _w.blockSignals(False)
+            _fg_update_params(st["waveform"])
+
+        self._fg_save_current = _fg_save_current
+        self._fg_load         = _fg_load
+
+        self._fg_drive_combo.currentIndexChanged.connect(
+            lambda _: (_fg_save_current(), _fg_load(self._fg_drive_combo.currentData())))
+
+        ecat_lay.addWidget(fg_group)
+        ecat_lay.addStretch(1)
 
         right_lay.addWidget(btn_w)
         right_lay.addWidget(self._script_panel, 1)
@@ -1958,13 +2126,38 @@ class DynoWindow(QMainWindow):
                 numeric[slot.field] = slot.value
         numeric["ch1_torque_scale"] = self._ch1_scale
         numeric["ch2_torque_scale"] = self._ch2_scale
+
+        # Sync current widget values into fg_state for the selected drive, then
+        # include both drives' FG fields so the bridge always gets a full update.
+        self._fg_save_current()
+        for _drive in ("main", "dut"):
+            _st    = self._fg_state[_drive]
+            _pfx   = f"{_drive}_fg"
+            numeric[f"{_pfx}_enable"]       = _st["enable"]
+            numeric[f"{_pfx}_waveform"]     = _st["waveform"]
+            numeric[f"{_pfx}_control_type"] = _st["control_type"]
+            numeric[f"{_pfx}_amplitude"]    = _st["amplitude"]
+            numeric[f"{_pfx}_frequency"]    = _st["frequency"]
+            numeric[f"{_pfx}_offset"]       = _st["offset"]
+            numeric[f"{_pfx}_phase"]        = _st["phase"]
+            numeric[f"{_pfx}_chirp_f_low"]  = _st["chirp_f_low"]
+            numeric[f"{_pfx}_chirp_f_high"] = _st["chirp_f_high"]
+            numeric[f"{_pfx}_chirp_dur"]    = _st["chirp_dur"]
+
+        # Mode comes directly from the DS402 mode combos, which are auto-synced
+        # by _fg_on_ctrl_type when the FG control type changes.  The RT
+        # callback's apply_fg is the per-cycle enforcer; NO_MODE on FG disable
+        # is handled there as well.
+        main_mode_val = DS402_MODES[self._main_mode_combo.currentIndex()][1]
+        dut_mode_val  = DS402_MODES[self._dut_mode_combo.currentIndex()][1]
+
         self._cmd.set_command(
             numeric      = numeric,
             main_enable  = self._main_enabled,
             dut_enable   = self._dut_enabled,
             hold_output1 = self._hold_output1,
-            main_mode    = DS402_MODES[self._main_mode_combo.currentIndex()][1],
-            dut_mode     = DS402_MODES[self._dut_mode_combo.currentIndex()][1],
+            main_mode    = main_mode_val,
+            dut_mode     = dut_mode_val,
         )
 
     # ── SDO handlers ──────────────────────────────────────────────────────────

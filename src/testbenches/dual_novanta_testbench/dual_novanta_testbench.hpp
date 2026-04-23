@@ -6,6 +6,7 @@
 #include "ethercat_core/devices/beckhoff/el3002/adapter.hpp"
 #include "ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp"
 #include "pdo_log.hpp"
+#include "testbench_utils/function_generator.hpp"
 
 #include <chrono>
 #include <mutex>
@@ -84,6 +85,28 @@ struct CommandState {
     bool     zero_torque_ch2      = false;
     // One-shot log-rotation flag — triggers drain thread to close and reopen CSV.
     bool     save_log             = false;
+    // Function generator config (main drive)
+    bool     main_fg_enable       = false;
+    int      main_fg_waveform     = 0;    // WaveformType as int
+    int      main_fg_control_type = 0;    // ControlType as int
+    float    main_fg_amplitude    = 0.0f;
+    float    main_fg_frequency    = 1.0f;
+    float    main_fg_offset       = 0.0f;
+    float    main_fg_phase        = 0.0f;
+    // Function generator config (DUT drive)
+    bool     dut_fg_enable        = false;
+    int      dut_fg_waveform      = 0;
+    int      dut_fg_control_type  = 0;
+    float    dut_fg_amplitude     = 0.0f;
+    float    dut_fg_frequency     = 1.0f;
+    float    dut_fg_offset        = 0.0f;
+    float    dut_fg_phase         = 0.0f;
+    float    main_fg_chirp_f_low  = 0.1f;
+    float    main_fg_chirp_f_high = 10.0f;
+    float    main_fg_chirp_dur    = 10.0f;
+    float    dut_fg_chirp_f_low   = 0.1f;
+    float    dut_fg_chirp_f_high  = 10.0f;
+    float    dut_fg_chirp_dur     = 10.0f;
 };
 
 // ── Per-drive gain snapshot ────────────────────────────────────────────────────
@@ -147,7 +170,6 @@ public:
     static std::string makeDriveJson(
         const std::string& slave_name,
         int   soem_idx,
-        float cmd_vel_rad_s,
         const ethercat_core::SystemStatus& status,
         int   out_enc_bits,
         const DriveGains& gains
@@ -179,4 +201,11 @@ private:
     ethercat_core::beckhoff::el3002::El3002Adapter* el3002_;
     int         drive_soem_idx_, dut_soem_idx_;
     int         main_out_enc_bits_, dut_out_enc_bits_;
+
+    testbench_utils::FunctionGenerator fg_main_;
+    testbench_utils::FunctionGenerator fg_dut_;
+    int32_t  main_captured_pos_ = 0;
+    int32_t  dut_captured_pos_  = 0;
+    int8_t   prev_main_mode_    = 0;
+    int8_t   prev_dut_mode_     = 0;
 };

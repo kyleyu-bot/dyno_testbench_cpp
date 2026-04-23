@@ -12,7 +12,8 @@ FunctionGenerator::FunctionGenerator()
 
 void FunctionGenerator::reset()
 {
-    mode_        = FunctionGeneratorMode::OFF;
+    waveform_type_ = WaveformType::OFF;
+    control_type_  = ControlType::NONE;
     amplitude_   = 0.0;
     frequency_   = 1.0;
     offset_      = 0.0;
@@ -32,14 +33,27 @@ void FunctionGenerator::reset()
     stopped_     = false;
 }
 
+void FunctionGenerator::enable()
+{
+    t_elapsed_  = 0.0;
+    value_      = 0.0;
+    value_dot_  = 0.0;
+    value_ddot_ = 0.0;
+    prev_value_ = 0.0;
+    prev_dot_   = 0.0;
+    integral_   = 0.0;
+    stopped_    = false;
+}
+
 void FunctionGenerator::stop(bool full_reset)
 {
     if (full_reset) {
         reset();
     } else {
-        stopped_ = true;
-        // value_, value_dot_, value_ddot_ hold their last computed values.
-        // All parameters and t_elapsed_ are preserved.
+        stopped_    = true;
+        value_      = 0.0;
+        value_dot_  = 0.0;
+        value_ddot_ = 0.0;
     }
 }
 
@@ -66,20 +80,20 @@ void FunctionGenerator::recompute(double dt)
     const double C = offset_;
     const double t = t_elapsed_;
 
-    switch (mode_) {
-    case FunctionGeneratorMode::OFF:
+    switch (waveform_type_) {
+    case WaveformType::OFF:
         value_      = 0.0;
         value_dot_  = 0.0;
         value_ddot_ = 0.0;
         break;
 
-    case FunctionGeneratorMode::DC:
+    case WaveformType::DC:
         value_      = C;
         value_dot_  = 0.0;
         value_ddot_ = 0.0;
         break;
 
-    case FunctionGeneratorMode::SINE: {
+    case WaveformType::SINE: {
         const double theta = TWO_PI * f * t + phase_;
         const double wn    = TWO_PI * f;
         value_      = A * std::sin(theta) + C;
@@ -88,7 +102,7 @@ void FunctionGenerator::recompute(double dt)
         break;
     }
 
-    case FunctionGeneratorMode::SQUARE: {
+    case WaveformType::SQUARE: {
         const double s     = std::sin(TWO_PI * f * t + phase_);
         const double sign  = (s >= 0.0) ? 1.0 : -1.0;
         value_      = C + A * sign;
@@ -97,7 +111,7 @@ void FunctionGenerator::recompute(double dt)
         break;
     }
 
-    case FunctionGeneratorMode::TRIANGLE: {
+    case WaveformType::TRIANGLE: {
         const double tau = std::fmod(f * t + phase_ / TWO_PI, 1.0);
         const double raw = 2.0 * std::abs(2.0 * tau - 1.0) - 1.0;
         value_      = C + A * raw;
@@ -106,7 +120,7 @@ void FunctionGenerator::recompute(double dt)
         break;
     }
 
-    case FunctionGeneratorMode::SAWTOOTH: {
+    case WaveformType::SAWTOOTH: {
         const double tau = std::fmod(f * t + phase_ / TWO_PI, 1.0);
         value_      = C + A * tau;
         value_dot_  = A * f;
@@ -114,7 +128,7 @@ void FunctionGenerator::recompute(double dt)
         break;
     }
 
-    case FunctionGeneratorMode::WHITE_NOISE: {
+    case WaveformType::WHITE_NOISE: {
         prev_dot_   = value_dot_;
         prev_value_ = value_;
         value_      = C + A * noise_dist_(rng_);
@@ -123,7 +137,7 @@ void FunctionGenerator::recompute(double dt)
         break;
     }
 
-    case FunctionGeneratorMode::CHIRP_LINEAR: {
+    case WaveformType::CHIRP_LINEAR: {
         if (t > chirp_dur_) {
             value_      = C;
             value_dot_  = 0.0;

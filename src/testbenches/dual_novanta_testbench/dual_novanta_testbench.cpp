@@ -1,7 +1,5 @@
 #include "dual_novanta_testbench.hpp"
 
-#include "testbench_utils/function_generator.hpp"
-
 #include "ethercat_core/devices/beckhoff/el2004/data_types.hpp"
 #include "ethercat_core/devices/beckhoff/el3002/data_types.hpp"
 #include "ethercat_core/devices/beckhoff/el5032/data_types.hpp"
@@ -21,6 +19,8 @@ extern "C" {
 using namespace ethercat_core;
 using namespace ethercat_core::novanta::volcano;
 using ModeOfOperation = ethercat_core::ds402::ModeOfOperation;
+using WaveformType    = testbench_utils::WaveformType;
+using ControlType     = testbench_utils::ControlType;
 using json            = nlohmann::json;
 
 // ── Constructor ───────────────────────────────────────────────────────────────
@@ -160,6 +160,124 @@ EthercatLoop::CycleCallback DualNovantaTestbench::makeCallback(
         dut_cmd.position_loop_kp        = cmd.dut_pos_kp;
         dut_cmd.position_loop_ki        = cmd.dut_pos_ki;
         dut_cmd.position_loop_kd        = cmd.dut_pos_kd;
+
+        // ── Function generator ─────────────────────────────────────────────────
+        const double dt_s = (stats.last_period_ns > 0)
+                            ? static_cast<double>(stats.last_period_ns) * 1e-9 : 1e-3;
+
+        fg_main_.setWaveformType(static_cast<WaveformType>(cmd.main_fg_waveform));
+        fg_main_.setControlType(static_cast<ControlType>(cmd.main_fg_control_type));
+        fg_main_.setAmplitude(cmd.main_fg_amplitude);
+        fg_main_.setFrequency(cmd.main_fg_frequency);
+        fg_main_.setOffset(cmd.main_fg_offset);
+        fg_main_.setPhase(cmd.main_fg_phase);
+        fg_main_.setChirpLowFrequency(cmd.main_fg_chirp_f_low);
+        fg_main_.setChirpHighFrequency(cmd.main_fg_chirp_f_high);
+        fg_main_.setChirpDuration(cmd.main_fg_chirp_dur);
+        if (cmd.main_fg_enable && !fg_main_.isEnabled()) {
+            if (static_cast<ControlType>(cmd.main_fg_control_type) == ControlType::POSITION) {
+                auto it = status.by_slave.find(drive_slave_);
+                if (it != status.by_slave.end() && it->second.has_value())
+                    main_captured_pos_ = std::any_cast<const DriveStatus&>(it->second)
+                                             .measured_output_side_position_raw_cnt;
+            }
+            fg_main_.enable();
+        } else if (!cmd.main_fg_enable && fg_main_.isEnabled()) {
+            fg_main_.stop(false);
+            main_cmd.mode_of_operation = ModeOfOperation::NO_MODE;
+        }
+        fg_main_.update(dt_s);
+
+        fg_dut_.setWaveformType(static_cast<WaveformType>(cmd.dut_fg_waveform));
+        fg_dut_.setControlType(static_cast<ControlType>(cmd.dut_fg_control_type));
+        fg_dut_.setAmplitude(cmd.dut_fg_amplitude);
+        fg_dut_.setFrequency(cmd.dut_fg_frequency);
+        fg_dut_.setOffset(cmd.dut_fg_offset);
+        fg_dut_.setPhase(cmd.dut_fg_phase);
+        fg_dut_.setChirpLowFrequency(cmd.dut_fg_chirp_f_low);
+        fg_dut_.setChirpHighFrequency(cmd.dut_fg_chirp_f_high);
+        fg_dut_.setChirpDuration(cmd.dut_fg_chirp_dur);
+        if (cmd.dut_fg_enable && !fg_dut_.isEnabled()) {
+            if (static_cast<ControlType>(cmd.dut_fg_control_type) == ControlType::POSITION) {
+                auto it = status.by_slave.find(dut_slave_);
+                if (it != status.by_slave.end() && it->second.has_value())
+                    dut_captured_pos_ = std::any_cast<const DriveStatus&>(it->second)
+                                            .measured_output_side_position_raw_cnt;
+            }
+            fg_dut_.enable();
+        } else if (!cmd.dut_fg_enable && fg_dut_.isEnabled()) {
+            fg_dut_.stop(false);
+            dut_cmd.mode_of_operation = ModeOfOperation::NO_MODE;
+        }
+        fg_dut_.update(dt_s);
+
+        // Determine effective mode (FG control type may override bridge mode)
+        auto eff_mode = [](ModeOfOperation base, const testbench_utils::FunctionGenerator& fg) {
+            if (!fg.isEnabled()) return base;
+            switch (fg.getControlType()) {
+            case ControlType::POSITION: return ModeOfOperation::CYCLIC_SYNC_POSITION;
+            case ControlType::VELOCITY: return ModeOfOperation::CYCLIC_SYNC_VELOCITY;
+            case ControlType::TORQUE:
+            case ControlType::CURRENT:  return ModeOfOperation::CYCLIC_SYNC_TORQUE;
+            default:                    return base;
+            }
+        };
+        const ModeOfOperation eff_main = eff_mode(main_cmd.mode_of_operation, fg_main_);
+        const ModeOfOperation eff_dut  = eff_mode(dut_cmd.mode_of_operation,  fg_dut_);
+
+        // Position mode transition → capture current output encoder position
+        auto is_pos_mode = [](ModeOfOperation m) {
+            return m == ModeOfOperation::CYCLIC_SYNC_POSITION ||
+                   m == ModeOfOperation::PROFILE_POSITION;
+        };
+        if (is_pos_mode(eff_main) &&
+            !is_pos_mode(static_cast<ModeOfOperation>(prev_main_mode_))) {
+            auto it = status.by_slave.find(drive_slave_);
+            if (it != status.by_slave.end() && it->second.has_value())
+                main_captured_pos_ = std::any_cast<const DriveStatus&>(it->second)
+                                         .measured_output_side_position_raw_cnt;
+        }
+        if (is_pos_mode(eff_dut) &&
+            !is_pos_mode(static_cast<ModeOfOperation>(prev_dut_mode_))) {
+            auto it = status.by_slave.find(dut_slave_);
+            if (it != status.by_slave.end() && it->second.has_value())
+                dut_captured_pos_ = std::any_cast<const DriveStatus&>(it->second)
+                                        .measured_output_side_position_raw_cnt;
+        }
+        prev_main_mode_ = static_cast<int8_t>(eff_main);
+        prev_dut_mode_  = static_cast<int8_t>(eff_dut);
+
+        // Apply FG override to drive command fields
+        auto apply_fg = [&](Command& drive_cmd,
+                            const testbench_utils::FunctionGenerator& fg,
+                            int32_t captured_pos, int out_enc_bits) {
+            if (!fg.isEnabled()) return;
+            const double val = fg.getValue();
+            switch (fg.getControlType()) {
+            case ControlType::POSITION:
+                drive_cmd.target_position__enc_cnt =
+                    static_cast<float>(captured_pos) +
+                    static_cast<float>(val * static_cast<double>(1LL << out_enc_bits) / (2.0 * M_PI));
+                drive_cmd.mode_of_operation = ModeOfOperation::CYCLIC_SYNC_POSITION;
+                break;
+            case ControlType::VELOCITY:
+                drive_cmd.target_velocity_mrevs =
+                    static_cast<float>(val * 1000.0 / (2.0 * M_PI));
+                drive_cmd.mode_of_operation = ModeOfOperation::CYCLIC_SYNC_VELOCITY;
+                break;
+            case ControlType::TORQUE:
+                drive_cmd.target_torque_nm = static_cast<float>(val);
+                drive_cmd.mode_of_operation = ModeOfOperation::CYCLIC_SYNC_TORQUE;
+                break;
+            case ControlType::CURRENT:
+                drive_cmd.torque_command_2022 = static_cast<float>(val);
+                drive_cmd.mode_of_operation = ModeOfOperation::CYCLIC_SYNC_TORQUE;
+                break;
+            default: break;
+            }
+        };
+        apply_fg(main_cmd, fg_main_, main_captured_pos_, main_out_enc_bits_);
+        apply_fg(dut_cmd,  fg_dut_,  dut_captured_pos_,  dut_out_enc_bits_);
 
         beckhoff::el2004::Command io_cmd;
         io_cmd.output_1 = cmd.hold_output1;
@@ -309,7 +427,6 @@ std::string DualNovantaTestbench::serializeToCsvRow(const dyno::PdoLogRecord& r)
 std::string DualNovantaTestbench::makeDriveJson(
     const std::string& slave_name,
     int   soem_idx,
-    float cmd_vel_rad_s,
     const SystemStatus& status,
     int   out_enc_bits,
     const DriveGains& gains)
@@ -323,8 +440,8 @@ std::string DualNovantaTestbench::makeDriveJson(
         const auto& ds = std::any_cast<const DriveStatus&>(it->second);
         const double enc_to_rad = 2.0 * M_PI / static_cast<double>(1LL << out_enc_bits);
         j["state"]              = cia402Name(ds.cia402_state);
-        j["cmd_vel_rev_per_s"]  = static_cast<double>(cmd_vel_rad_s) / (2.0 * M_PI);
-        j["cmd_vel_rad_per_s"]  = static_cast<double>(cmd_vel_rad_s);
+        j["cmd_vel_rad_per_s"]  = static_cast<double>(ds.velocity_command_received) * (2.0 * M_PI);
+        j["cmd_vel_rev_per_s"]  = static_cast<double>(ds.velocity_command_received);
         j["fb_vel_raw"]         = ds.measured_input_side_velocity_raw;
         j["fb_vel_rad_per_s"]   = static_cast<double>(ds.measured_input_side_velocity_raw)
                                   * (2.0 * M_PI / 1000.0);
