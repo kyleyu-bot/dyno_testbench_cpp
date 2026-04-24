@@ -67,6 +67,8 @@ DEFAULT_TOPOLOGY    = "config/ethercat_device_config/topology.dyno2.template6.js
 DEFAULT_PUB_HZ      = 200.0
 TEST_SCRIPTS_DIR    = "src/dyno_test_scripts"  # scanned for *.py test scripts
 DEFAULT_FAULT_S  = 2.0
+STARTUP_WINDOW_WIDTH  = 2400
+STARTUP_WINDOW_HEIGHT = 360
 
 CMD_MIME  = "application/x-dyno-command-field"
 NUM_SLOTS      = 9   # number of slider slots shown
@@ -440,6 +442,14 @@ class DynoCommander(Node):
         self._ch1_scale_nm:  float = 200.0   # default, matches El3002Adapter ch1
         self._ch2_scale_nm:  float = 20.0    # default, matches El3002Adapter ch2
 
+        # Output-side encoder position (rad, post gear-ratio) from drive status JSON.
+        self._main_output_pos_rad: float = 0.0
+        self._dut_output_pos_rad:  float = 0.0
+
+        # Input-side encoder position (raw counts, 0x204A) from drive status JSON.
+        self._main_input_enc_pos: int = 0
+        self._dut_input_enc_pos:  int = 0
+
         self.create_subscription(StringMsg, "/dyno/main_drive/status",
             lambda msg: self._on_status(msg, "main"), 10)
         self.create_subscription(StringMsg, "/dyno/dut/status",
@@ -513,15 +523,21 @@ class DynoCommander(Node):
         }
         error_code = int(data.get("err", 0))
         al_state   = str(data.get("al", "?"))
+        output_pos  = float(data.get("output_pos_rad", 0.0))
+        input_enc   = int(data.get("in_enc_pos", 0))
         with self._limits_lock:
             if drive == "main":
-                self._main_limits     = limits
-                self._main_error_code = error_code
-                self._main_al_state   = al_state
+                self._main_limits         = limits
+                self._main_error_code     = error_code
+                self._main_al_state       = al_state
+                self._main_output_pos_rad = output_pos
+                self._main_input_enc_pos  = input_enc
             else:
-                self._dut_limits      = limits
-                self._dut_error_code  = error_code
-                self._dut_al_state    = al_state
+                self._dut_limits          = limits
+                self._dut_error_code      = error_code
+                self._dut_al_state        = al_state
+                self._dut_output_pos_rad  = output_pos
+                self._dut_input_enc_pos   = input_enc
         if self._limits_callback:
             self._limits_callback(drive)
 
@@ -563,6 +579,16 @@ class DynoCommander(Node):
         """Return the current full-scale range (Nm) for 'ch1' or 'ch2'."""
         with self._limits_lock:
             return self._ch1_scale_nm if channel == "ch1" else self._ch2_scale_nm
+
+    def get_output_pos_rad(self, drive: str) -> float:
+        """Return the latest output-side encoder position (rad) for 'main' or 'dut'."""
+        with self._limits_lock:
+            return self._main_output_pos_rad if drive == "main" else self._dut_output_pos_rad
+
+    def get_input_enc_pos_raw(self, drive: str) -> int:
+        """Return the latest input-side encoder position (raw counts, 0x204A) for 'main' or 'dut'."""
+        with self._limits_lock:
+            return self._main_input_enc_pos if drive == "main" else self._dut_input_enc_pos
 
     def set_limits_callback(self, cb) -> None:
         self._limits_callback = cb
@@ -728,6 +754,7 @@ class SliderSlot(QGroupBox):
         super().__init__(SliderSlot._PLACEHOLDER, parent)
         self._field: str | None = None
         self._float_mode        = False
+        self._scale: float      = 1.0
         self._on_drop          = on_drop           # (key) -> (min,max,default) | None
         self._is_field_allowed = is_field_allowed  # (key) -> bool
         self._on_assigned      = on_assigned       # (key) -> None
@@ -773,8 +800,13 @@ class SliderSlot(QGroupBox):
         self._float_spin.setSingleStep(0.000001)
         self._float_spin.setDecimals(6)
         self._float_spin.setValue(0.0)
+        self._float_spin.wheelEvent = lambda e: e.ignore()
         self._float_spin.hide()
         self._committed_float: float = 0.0
+
+        # Scale display (shows ×1,000 or ×1,000,000 after a drop)
+        self._scale_label = QLabel("")
+        self._scale_label.setAlignment(Qt.AlignCenter)
 
         # Value display
         self._val_label = QLabel("0")
@@ -785,6 +817,7 @@ class SliderSlot(QGroupBox):
         self._clear_btn.clicked.connect(self._unassign)
 
         col = QVBoxLayout(self)
+        col.addWidget(self._scale_label)
         col.addWidget(self._max_spin)
         col.addWidget(self._slider, 1, Qt.AlignHCenter)
         col.addWidget(self._float_spin)
@@ -824,7 +857,7 @@ class SliderSlot(QGroupBox):
     # ── value sync ────────────────────────────────────────────────────────────
 
     def _on_slider_moved(self, v: int):
-        self._val_label.setText(str(v))
+        self._val_label.setText(f"{v / self._scale:.3f}")
         self._exact_spin.blockSignals(True)
         self._exact_spin.setValue(v)
         self._exact_spin.blockSignals(False)
@@ -833,11 +866,11 @@ class SliderSlot(QGroupBox):
         self._slider.blockSignals(True)
         self._slider.setValue(v)
         self._slider.blockSignals(False)
-        self._val_label.setText(str(v))
+        self._val_label.setText(f"{v / self._scale:.3f}")
 
     def _on_float_changed(self, v: float):
         self._committed_float = v
-        self._val_label.setText(f"{v:.6f}")
+        self._val_label.setText(f"{v / self._scale:.6f}")
 
     # ── float mode ────────────────────────────────────────────────────────────
 
@@ -853,7 +886,7 @@ class SliderSlot(QGroupBox):
         self._float_spin.setValue(default)
         self._committed_float = default
         self._float_spin.blockSignals(False)
-        self._val_label.setText(f"{default:.6f}")
+        self._val_label.setText(f"{default / self._scale:.6f}")
         self._float_spin.show()
 
     def clear_float_mode(self):
@@ -889,27 +922,27 @@ class SliderSlot(QGroupBox):
             result = self._on_drop(key)
             if result is not None:
                 lo, hi, default = result
-                if key in GAIN_FIELDS:
-                    self.set_float_mode(lo, hi, default)
-                else:
-                    self.clear_float_mode()
-                    # Block signals to avoid cross-clamping during bulk update.
-                    for w in (self._min_spin, self._max_spin,
-                              self._slider, self._exact_spin):
-                        w.blockSignals(True)
-                    lo_i, hi_i, def_i = int(lo), int(hi), int(default)
-                    self._min_spin.setValue(lo_i)
-                    self._max_spin.setValue(hi_i)
-                    self._slider.setMinimum(lo_i)
-                    self._slider.setMaximum(hi_i)
-                    self._exact_spin.setMinimum(lo_i)
-                    self._exact_spin.setMaximum(hi_i)
-                    self._slider.setValue(def_i)
-                    self._exact_spin.setValue(def_i)
-                    self._val_label.setText(str(def_i))
-                    for w in (self._min_spin, self._max_spin,
-                              self._slider, self._exact_spin):
-                        w.blockSignals(False)
+                self._scale = 1_000_000.0 if key in GAIN_FIELDS else 1_000.0
+                sc = self._scale
+                self._scale_label.setText(f"×{int(sc):,}")
+                lo_s, hi_s, def_s = lo * sc, hi * sc, default * sc
+                self.clear_float_mode()
+                for w in (self._min_spin, self._max_spin,
+                          self._slider, self._exact_spin):
+                    w.blockSignals(True)
+                lo_i, hi_i, def_i = int(lo_s), int(hi_s), int(def_s)
+                self._min_spin.setValue(lo_i)
+                self._max_spin.setValue(hi_i)
+                self._slider.setMinimum(lo_i)
+                self._slider.setMaximum(hi_i)
+                self._exact_spin.setMinimum(lo_i)
+                self._exact_spin.setMaximum(hi_i)
+                self._slider.setValue(def_i)
+                self._exact_spin.setValue(def_i)
+                self._val_label.setText(f"{def_i / sc:.3f}")
+                for w in (self._min_spin, self._max_spin,
+                          self._slider, self._exact_spin):
+                    w.blockSignals(False)
         ev.acceptProposedAction()
 
     def contextMenuEvent(self, ev):
@@ -938,6 +971,8 @@ class SliderSlot(QGroupBox):
     def _unassign(self):
         old = self._field
         self._field = None
+        self._scale = 1.0
+        self._scale_label.setText("")
         self.setTitle(SliderSlot._PLACEHOLDER)
         self.clear_float_mode()
         self._slider.setValue(0)
@@ -961,10 +996,9 @@ class SliderSlot(QGroupBox):
 
     @property
     def value(self):
-        """Return float if in gain mode, int otherwise."""
         if self._float_mode:
-            return self._committed_float
-        return self._slider.value()
+            return self._committed_float / self._scale
+        return self._slider.value() / self._scale
 
     def zero(self):
         if self._float_mode:
@@ -975,12 +1009,13 @@ class SliderSlot(QGroupBox):
 
     def apply_limits(self, lo: float, hi: float):
         """Update slider range without resetting the current value (integer mode only)."""
+        sc = self._scale
         if self._float_mode:
             self._float_spin.blockSignals(True)
-            self._float_spin.setRange(lo, hi)
+            self._float_spin.setRange(lo * sc, hi * sc)
             self._float_spin.blockSignals(False)
             return
-        lo_i, hi_i = int(lo), int(hi)
+        lo_i, hi_i = int(lo * sc), int(hi * sc)
         for w in (self._min_spin, self._max_spin, self._slider, self._exact_spin):
             w.blockSignals(True)
         self._min_spin.setValue(lo_i)
@@ -1455,12 +1490,27 @@ class DynoWindow(QMainWindow):
         super().showEvent(event)
         if not hasattr(self, '_initially_sized'):
             self._initially_sized = True
-            QTimer.singleShot(50, self._fit_window_to_content)
+            QTimer.singleShot(50, self._apply_initial_window_size)
+
+    def _target_startup_width(self) -> int:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return STARTUP_WINDOW_WIDTH
+        # Keep a little horizontal headroom for the window manager decorations.
+        return min(STARTUP_WINDOW_WIDTH, max(200, screen.availableGeometry().width() - 40))
+
+    def _apply_initial_window_size(self):
+        # Some window managers restore the last maximized state unless we
+        # explicitly put the window back into normal mode before sizing it.
+        if self.isMaximized():
+            self.showNormal()
+        self.resize(self._target_startup_width(), STARTUP_WINDOW_HEIGHT)
+        self._fit_window_to_content()
 
     def _fit_window_to_content(self):
         """Resize height to content after first layout pass (actual sizes known)."""
         h = self.centralWidget().sizeHint().height()
-        screen = QApplication.primaryScreen()
+        screen = self.screen() or QApplication.primaryScreen()
         if screen is not None:
             # Leave a little headroom for the window frame/title bar.
             h = min(h, max(200, screen.availableGeometry().height() - 360))
@@ -2039,7 +2089,7 @@ class DynoWindow(QMainWindow):
         self.setCentralWidget(central)
 
         # Rough initial width; height corrected after first layout pass.
-        self.resize(self.sizeHint().width() or 1200, 360)
+        self.resize(STARTUP_WINDOW_WIDTH, STARTUP_WINDOW_HEIGHT)
 
     # ── button callbacks ──────────────────────────────────────────────────────
 
@@ -2495,7 +2545,7 @@ def main():
     # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
     window = DynoWindow(commander)
-    window.resize(1400, 360)
+    window.resize(STARTUP_WINDOW_WIDTH, STARTUP_WINDOW_HEIGHT)
 
     if bridge_proc is not None:
         window.set_status(f"bridge_ros2 PID {bridge_proc.pid}")
