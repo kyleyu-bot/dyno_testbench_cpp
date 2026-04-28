@@ -5,6 +5,7 @@
 namespace testbench_utils {
 
 static constexpr double TWO_PI = 2.0 * M_PI;
+static constexpr double MIN_EXPONENTIAL_CHIRP_DURATION = 1.0;
 
 FunctionGenerator::FunctionGenerator()
     : rng_(std::random_device{}())
@@ -156,7 +157,79 @@ void FunctionGenerator::recompute(double dt)
         value_ddot_ = A * (wn_dot * std::cos(phi) - wn * wn * std::sin(phi));
         break;
     }
+
+    case WaveformType::CHIRP_EXPONENTIAL: {
+        if (t > chirp_dur_) {
+            value_      = C;
+            value_dot_  = 0.0;
+            value_ddot_ = 0.0;
+            break;
+        }
+
+        const double T    = std::max(chirp_dur_, MIN_EXPONENTIAL_CHIRP_DURATION);
+        const double f_lo = std::max(chirp_f_low_, 0.001);
+        const double f_hi = (chirp_f_high_ > f_lo) ? chirp_f_high_ : 2.0 * f_lo + 1.0;
+        const double rate = getExponentialChirpRate(f_lo, f_hi, T);
+
+        double phi = phase_;
+        double inst_f = 0.0;
+        double inst_f_dot = 0.0;
+
+        if (t > 0.0 && rate > 0.0 && std::abs(std::log(rate)) > 1e-12) {
+            const double log_rate = std::log(rate);
+            const double rate_to_t = std::pow(rate, t);
+            const double effective_f = f_lo * (rate_to_t - 1.0) / (log_rate * t);
+            phi += TWO_PI * effective_f * t;
+            inst_f = f_lo * rate_to_t;
+            inst_f_dot = inst_f * log_rate;
+        }
+
+        const double wn = TWO_PI * inst_f;
+        const double wn_dot = TWO_PI * inst_f_dot;
+        value_      = A * std::sin(phi) + C;
+        value_dot_  = A * wn * std::cos(phi);
+        value_ddot_ = A * (wn_dot * std::cos(phi) - wn * wn * std::sin(phi));
+        break;
     }
+    }
+}
+
+double FunctionGenerator::getExponentialChirpRate(double f_low, double f_high, double duration)
+{
+    if (f_high <= f_low) {
+        f_high = 2.0 * f_low + 1.0;
+    }
+
+    if (duration <= 0.0) {
+        duration = MIN_EXPONENTIAL_CHIRP_DURATION;
+    }
+
+    double lower_bound = 0.0001;
+    double upper_bound = 1e12;
+
+    for (int i = 0; i < 100; ++i) {
+        const double midpoint = (upper_bound + lower_bound) / 2.0;
+        const double value = computeExponentialChirpRateExpression(f_low, f_high, duration, midpoint);
+
+        if (value < 0.0) {
+            lower_bound = midpoint;
+        } else if (value > 0.0) {
+            upper_bound = midpoint;
+        } else {
+            upper_bound = midpoint;
+            break;
+        }
+    }
+
+    return upper_bound;
+}
+
+double FunctionGenerator::computeExponentialChirpRateExpression(double f_low,
+                                                                double f_high,
+                                                                double duration,
+                                                                double rate)
+{
+    return (f_low * (std::pow(rate, duration) - 1.0)) / (f_high * std::log(rate) * duration) - 1.0;
 }
 
 } // namespace testbench_utils

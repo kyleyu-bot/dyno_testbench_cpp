@@ -13,6 +13,7 @@ enum class WaveformType {
     SAWTOOTH,
     WHITE_NOISE,
     CHIRP_LINEAR,
+    CHIRP_EXPONENTIAL,
 };
 
 enum class ControlType : int {
@@ -101,6 +102,8 @@ private:
     std::uniform_real_distribution<double> noise_dist_{-1.0, 1.0};
 
     void recompute(double dt);
+    static double getExponentialChirpRate(double f_low, double f_high, double duration);
+    static double computeExponentialChirpRateExpression(double f_low, double f_high, double duration, double rate);
 };
 
 } // namespace testbench_utils

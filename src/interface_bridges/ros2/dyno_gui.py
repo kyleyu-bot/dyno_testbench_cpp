@@ -229,6 +229,7 @@ GAIN_FIELDS = {
 
 # DS402 modes of operation: (display label, int value sent in JSON)
 DS402_MODES = [
+    ("Current (-2)",                -2),
     ("No Mode (0)",                  0),
     ("Profile Position (1)",         1),
     ("Profile Velocity (2)",         2),
@@ -1449,10 +1450,13 @@ class ScriptingPanel(QGroupBox):
 
 class DynoWindow(QMainWindow):
 
-    def __init__(self, commander: DynoCommander, scripts_dir: str = TEST_SCRIPTS_DIR):
+    def __init__(self, commander: DynoCommander, scripts_dir: str = TEST_SCRIPTS_DIR,
+                 bridge_proc=None, bridge_args=None):
         super().__init__()
         self._cmd            = commander
         self._scripts_dir    = scripts_dir
+        self._bridge_proc    = bridge_proc
+        self._bridge_args    = bridge_args
         self._main_enabled   = False
         self._dut_enabled    = False
         self._hold_output1   = False
@@ -1485,6 +1489,12 @@ class DynoWindow(QMainWindow):
         self._error_timer = QTimer(self)
         self._error_timer.timeout.connect(self._refresh_all_errors)
         self._error_timer.start(500)   # 2 Hz
+
+        self._bridge_poll_timer = QTimer(self)
+        self._bridge_poll_timer.setInterval(500)
+        self._bridge_poll_timer.timeout.connect(self._poll_bridge)
+        self._bridge_poll_timer.start()
+        self._update_bridge_status()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1761,6 +1771,7 @@ class DynoWindow(QMainWindow):
         dut_fault_lay.addWidget(self._dut_fault_history)
 
         btn_lay.addWidget(dut_fault_group)
+        btn_lay.addStretch(1)
 
         # ── Scripting panel ───────────────────────────────────────────────────
         self._script_panel = ScriptingPanel(
@@ -1944,7 +1955,7 @@ class DynoWindow(QMainWindow):
         fg_wf.addWidget(QLabel("Waveform:"))
         self._fg_wf_combo = QComboBox()
         for _name in ["OFF", "DC", "Sine", "Square", "Triangle",
-                      "Sawtooth", "Noise", "Chirp"]:
+                      "Sawtooth", "Noise", "Chirp", "Exp Chirp"]:
             self._fg_wf_combo.addItem(_name)
         fg_wf.addWidget(self._fg_wf_combo)
         fg_lay.addLayout(fg_wf)
@@ -1990,6 +2001,7 @@ class DynoWindow(QMainWindow):
             5: ["amplitude", "frequency", "offset", "phase"],
             6: ["amplitude", "offset"],
             7: ["amplitude", "chirp_f_low", "chirp_f_high", "chirp_dur", "offset", "phase"],
+            8: ["amplitude", "chirp_f_low", "chirp_f_high", "chirp_dur", "offset", "phase"],
         }
         _fg_param_map = {
             "amplitude":   self._fg_amp_row,
@@ -2074,9 +2086,36 @@ class DynoWindow(QMainWindow):
         splitter.setStretchFactor(2, 0)
         splitter.setFixedHeight(max(200, _content_h - 15))
 
-        # ── Status label ───────────────────────────────────────────────────────
+        # ── Bottom status / bridge row ────────────────────────────────────────
+        status_row = QWidget()
+        status_lay = QHBoxLayout(status_row)
+        status_lay.setContentsMargins(6, 2, 6, 2)
+        status_lay.setSpacing(8)
+
         self._status_label = QLabel("bridge_ros2 starting…")
         self._status_label.setAlignment(Qt.AlignCenter)
+        status_lay.addWidget(self._status_label, 1)
+
+        self._bridge_status_lbl = QLabel("Bridge: ○ Stopped")
+        self._bridge_status_lbl.setFont(QFont("Monospace", 8))
+        status_lay.addWidget(self._bridge_status_lbl)
+
+        self._bridge_start_btn   = QPushButton("Start")
+        self._bridge_stop_btn    = QPushButton("Stop")
+        self._bridge_restart_btn = QPushButton("Restart")
+        status_lay.addWidget(self._bridge_start_btn)
+        status_lay.addWidget(self._bridge_stop_btn)
+        status_lay.addWidget(self._bridge_restart_btn)
+
+        self._bridge_start_btn.clicked.connect(self._on_bridge_start)
+        self._bridge_stop_btn.clicked.connect(self._on_bridge_stop)
+        self._bridge_restart_btn.clicked.connect(self._on_bridge_restart)
+
+        if self._bridge_args is None:
+            for _b in (self._bridge_start_btn, self._bridge_stop_btn,
+                       self._bridge_restart_btn):
+                _b.setEnabled(False)
+                _b.setToolTip("Bridge not managed by GUI")
 
         # ── Central widget ─────────────────────────────────────────────────────
         central = QWidget()
@@ -2085,7 +2124,7 @@ class DynoWindow(QMainWindow):
         vlay.setSpacing(0)
         vlay.addWidget(splitter)
         vlay.addWidget(spin_area)
-        vlay.addWidget(self._status_label)
+        vlay.addWidget(status_row)
         self.setCentralWidget(central)
 
         # Rough initial width; height corrected after first layout pass.
@@ -2476,6 +2515,67 @@ class DynoWindow(QMainWindow):
             time.sleep(0.15)
         event.accept()
 
+    # ── Bridge management ─────────────────────────────────────────────────────
+
+    def _stop_bridge(self):
+        """Send SIGINT to bridge, wait up to 5 s, then kill. No-op if not running."""
+        proc = self._bridge_proc
+        if proc is None or proc.poll() is not None:
+            return
+        print(f"[dyno_gui] Sending SIGINT to bridge_ros2 (PID {proc.pid})…")
+        proc.send_signal(signal.SIGINT)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        print("[dyno_gui] bridge_ros2 stopped.")
+        self._bridge_proc = None
+
+    def _on_bridge_start(self):
+        if self._bridge_proc and self._bridge_proc.poll() is None:
+            return
+        a = self._bridge_args
+        self._bridge_proc = launch_bridge(
+            a.bridge, a.topology, a.fault_reset_s, a.pub_hz, a.debug)
+        self._update_bridge_status()
+
+    def _on_bridge_stop(self):
+        self._stop_bridge()
+        self._update_bridge_status()
+
+    def _on_bridge_restart(self):
+        self._stop_bridge()
+        time.sleep(0.5)
+        self._on_bridge_start()
+
+    def _update_bridge_status(self):
+        if self._bridge_args is None:
+            return
+        proc = self._bridge_proc
+        if proc is None or proc.poll() is not None:
+            self._bridge_status_lbl.setText("Bridge: ○ Stopped")
+            self._bridge_start_btn.setEnabled(True)
+            self._bridge_stop_btn.setEnabled(False)
+            self._bridge_restart_btn.setEnabled(False)
+        else:
+            self._bridge_status_lbl.setText(f"Bridge: ● PID {proc.pid}")
+            self._bridge_start_btn.setEnabled(False)
+            self._bridge_stop_btn.setEnabled(True)
+            self._bridge_restart_btn.setEnabled(True)
+
+    def _poll_bridge(self):
+        if self._bridge_args is None:
+            return
+        proc = self._bridge_proc
+        if proc is not None and proc.poll() is not None:
+            self._bridge_proc = None
+            self._bridge_status_lbl.setText(
+                f"Bridge: ✕ Crashed (exit {proc.returncode})")
+            self.set_status(f"bridge_ros2 exited unexpectedly (code {proc.returncode})")
+            self._bridge_start_btn.setEnabled(True)
+            self._bridge_stop_btn.setEnabled(False)
+            self._bridge_restart_btn.setEnabled(False)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Bridge subprocess management
@@ -2544,7 +2644,7 @@ def main():
 
     # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
-    window = DynoWindow(commander)
+    window = DynoWindow(commander, bridge_proc=bridge_proc, bridge_args=args)
     window.resize(STARTUP_WINDOW_WIDTH, STARTUP_WINDOW_HEIGHT)
 
     if bridge_proc is not None:
@@ -2566,14 +2666,7 @@ def main():
 
     rclpy.shutdown()
 
-    if bridge_proc is not None:
-        print(f"[dyno_gui] Sending SIGINT to bridge_ros2 (PID {bridge_proc.pid})…")
-        bridge_proc.send_signal(signal.SIGINT)
-        try:
-            bridge_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            bridge_proc.kill()
-        print("[dyno_gui] bridge_ros2 stopped.")
+    window._stop_bridge()
 
     sys.exit(exit_code)
 
