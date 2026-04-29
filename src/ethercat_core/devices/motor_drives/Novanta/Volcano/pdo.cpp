@@ -26,6 +26,7 @@ std::vector<uint8_t> packCommand(
     pdo.torque_command_2022    = (cmd.torque_command_2022 != 0.0f)
                                       ? cmd.torque_command_2022
                                       : cmd.target_torque_nm;
+    pdo.iq_setpoint            = cmd.iq_setpoint_a;
     pdo.torque_kp              = cmd.torque_kp;
     pdo.torque_loop_max_output = cmd.torque_loop_max_output;
     pdo.torque_loop_min_output = cmd.torque_loop_min_output;
@@ -64,6 +65,12 @@ DriveStatus unpackStatus(
     int32_t  position_setpoint     = 0;
     float    received_velocity_raw = 0.0f;
     float    bus_voltage           = 0.0f;
+    float    motor_temp            = 0.0f;
+    float    iq_actual             = 0.0f;
+    float    id_actual             = 0.0f;
+    float    idc_actual            = 0.0f;
+    float    iq_command            = 0.0f;
+    float    id_command            = 0.0f;
     uint16_t error_code            = 0;
     uint8_t  al_state_code         = 0;
 
@@ -81,6 +88,12 @@ DriveStatus unpackStatus(
         position_setpoint      = pdo.position_setpoint;
         received_velocity_raw  = pdo.velocity_setpoint;
         bus_voltage            = pdo.bus_voltage;
+        motor_temp             = pdo.motor_temp;
+        iq_actual              = pdo.iq_actual;
+        id_actual              = pdo.id_actual;
+        idc_actual             = pdo.idc_actual;
+        iq_command             = pdo.iq_command;
+        id_command             = pdo.id_command;
         al_state_code          = (status_word != 0) ? AL_STATE_OPERATIONAL : 0u;
     } else {
         // Legacy layout: "<HbHhiiB"
@@ -129,6 +142,12 @@ DriveStatus unpackStatus(
     s.position_setpoint         = position_setpoint;
     s.velocity_command_received = received_velocity_raw;
     s.bus_voltage               = bus_voltage;
+    s.motor_temp                = motor_temp;
+    s.iq_actual                 = iq_actual;
+    s.id_actual                 = id_actual;
+    s.idc_actual                = idc_actual;
+    s.iq_command                = iq_command;
+    s.id_command                = id_command;
     s.dc_time_error_ns          = dc_error_ns;
     s.cycle_time_ns             = cycle_time_ns;
     s.seq                       = seq;

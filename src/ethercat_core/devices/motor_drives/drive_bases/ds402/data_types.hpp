@@ -6,6 +6,7 @@ namespace ethercat_core::ds402 {
 
 // CiA 402 mode of operation (object 0x6060).
 enum class ModeOfOperation : int8_t {
+    CURRENT                = -2,
     NO_MODE               = 0,
     PROFILE_POSITION      = 1,
     PROFILE_VELOCITY      = 2,

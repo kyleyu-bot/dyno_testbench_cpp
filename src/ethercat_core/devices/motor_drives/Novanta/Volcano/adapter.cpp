@@ -26,7 +26,7 @@ std::any NovantaVolcanoAdapter::unpackTxPdo(
     return status;
 }
 
-std::unordered_map<std::string, SdoReadSpec> NovantaVolcanoAdapter::startupReadSpecs() {
+std::unordered_map<std::string, SdoReadSpec> NovantaVolcanoAdapter::startupReadSpecs() const {
     // Same set of startup SDO reads as Everest.
     return {
         {"torque_loop_max_output", {.name="torque_loop_max_output", .index=0x2527, .subindex=0x00, .data_type="f32"}},
@@ -39,6 +39,7 @@ std::unordered_map<std::string, SdoReadSpec> NovantaVolcanoAdapter::startupReadS
         {"position_loop_kd",       {.name="position_loop_kd",       .index=0x2513, .subindex=0x00, .data_type="f32"}},
         {"motor_kt",               {.name="motor_kt",               .index=0x243B, .subindex=0x00, .data_type="f32"}},
         {"sensor_ratio",           {.name="sensor_ratio",           .index=0x2364, .subindex=0x00, .data_type="f32"}},
+        {"max_current",            {.name="max_current",            .index=0x21E0, .subindex=0x00, .data_type="f32"}},
         {"max_velocity_abs",       {.name="max_velocity_abs",       .index=0x21E8, .subindex=0x00, .data_type="f32"}},
         {"min_position",           {.name="min_position",           .index=0x21EA, .subindex=0x00, .data_type="f32"}},
         {"max_position",           {.name="max_position",           .index=0x21EB, .subindex=0x00, .data_type="f32"}},

@@ -51,6 +51,7 @@ struct PdoLogRecord {
     int32_t  main_rx_target_position     = 0;    ///< 0x607A  (raw engineering units)
     int32_t  main_rx_target_velocity     = 0;    ///< 0x60FF  (mrev/s)
     float    main_rx_torque_command      = 0.f;  ///< 0x2022  direct torque (Nm)
+    float    main_rx_iq_command          = 0.f;  ///< 0x201A  current quadrature set-point (A)
     float    main_rx_torque_kp           = 0.f;  ///< 0x2523
     float    main_rx_torque_max_out      = 0.f;  ///< 0x2527
     float    main_rx_torque_min_out      = 0.f;  ///< 0x2528
@@ -85,6 +86,7 @@ struct PdoLogRecord {
     int32_t  dut_rx_target_position      = 0;
     int32_t  dut_rx_target_velocity      = 0;
     float    dut_rx_torque_command       = 0.f;
+    float    dut_rx_iq_command           = 0.f;
     float    dut_rx_torque_kp            = 0.f;
     float    dut_rx_torque_max_out       = 0.f;
     float    dut_rx_torque_min_out       = 0.f;
@@ -113,7 +115,7 @@ inline constexpr const char* PDO_LOG_CSV_HEADER =
     "main_tx_idc_actual,main_tx_iq_command,main_tx_id_command,"
     // main rx
     "main_rx_mode_of_operation,main_rx_target_position,main_rx_target_velocity,"
-    "main_rx_torque_command,main_rx_torque_kp,main_rx_torque_max_out,main_rx_torque_min_out,"
+    "main_rx_torque_command,main_rx_iq_command,main_rx_torque_kp,main_rx_torque_max_out,main_rx_torque_min_out,"
     "main_rx_vel_kp,main_rx_vel_ki,main_rx_vel_kd,"
     "main_rx_pos_kp,main_rx_pos_ki,main_rx_pos_kd,main_rx_enable,"
     // dut tx
@@ -124,7 +126,7 @@ inline constexpr const char* PDO_LOG_CSV_HEADER =
     "dut_tx_idc_actual,dut_tx_iq_command,dut_tx_id_command,"
     // dut rx
     "dut_rx_mode_of_operation,dut_rx_target_position,dut_rx_target_velocity,"
-    "dut_rx_torque_command,dut_rx_torque_kp,dut_rx_torque_max_out,dut_rx_torque_min_out,"
+    "dut_rx_torque_command,dut_rx_iq_command,dut_rx_torque_kp,dut_rx_torque_max_out,dut_rx_torque_min_out,"
     "dut_rx_vel_kp,dut_rx_vel_ki,dut_rx_vel_kd,"
     "dut_rx_pos_kp,dut_rx_pos_ki,dut_rx_pos_kd,dut_rx_enable,"
     // sensors

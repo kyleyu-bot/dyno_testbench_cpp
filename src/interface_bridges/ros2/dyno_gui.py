@@ -67,6 +67,8 @@ DEFAULT_TOPOLOGY    = "config/ethercat_device_config/topology.dyno2.template6.js
 DEFAULT_PUB_HZ      = 200.0
 TEST_SCRIPTS_DIR    = "src/dyno_test_scripts"  # scanned for *.py test scripts
 DEFAULT_FAULT_S  = 2.0
+STARTUP_WINDOW_WIDTH  = 2400
+STARTUP_WINDOW_HEIGHT = 360
 
 CMD_MIME  = "application/x-dyno-command-field"
 NUM_SLOTS      = 9   # number of slider slots shown
@@ -227,6 +229,7 @@ GAIN_FIELDS = {
 
 # DS402 modes of operation: (display label, int value sent in JSON)
 DS402_MODES = [
+    ("Current (-2)",                -2),
     ("No Mode (0)",                  0),
     ("Profile Position (1)",         1),
     ("Profile Velocity (2)",         2),
@@ -239,6 +242,7 @@ DS402_DEFAULT_MODE = 9   # Cyclic Sync Velocity
 
 # Allowed torque sensor scale values — must match El3002Adapter::ALLOWED_TORQUE_SCALES
 TORQUE_SCALE_OPTIONS = [20, 200, 500]   # Nm
+CURRENT_COMMAND_FALLBACK_LIMIT_A = 20.0
 
 MAIN_ZERO_FIELDS = ["main_velocity", "main_position", "main_torque", "main_current"]
 DUT_ZERO_FIELDS  = ["dut_velocity",  "dut_position",  "dut_torque",  "dut_current"]
@@ -420,6 +424,7 @@ class DynoCommander(Node):
         # Drive limits — updated from status topics, used to auto-set slider ranges.
         _empty_limits = {
             "max_velocity_abs": 0.0, "min_position": 0.0, "max_position": 0.0,
+            "max_current_a": 0.0,
             "torque_kp": 0.0, "torque_max": 0.0, "torque_min": 0.0,
             "vel_kp": 0.0, "vel_ki": 0.0, "vel_kd": 0.0,
             "pos_kp": 0.0, "pos_ki": 0.0, "pos_kd": 0.0,
@@ -439,6 +444,14 @@ class DynoCommander(Node):
         self._ch2_torque_nm: float = 0.0
         self._ch1_scale_nm:  float = 200.0   # default, matches El3002Adapter ch1
         self._ch2_scale_nm:  float = 20.0    # default, matches El3002Adapter ch2
+
+        # Output-side encoder position (rad, post gear-ratio) from drive status JSON.
+        self._main_output_pos_rad: float = 0.0
+        self._dut_output_pos_rad:  float = 0.0
+
+        # Input-side encoder position (raw counts, 0x204A) from drive status JSON.
+        self._main_input_enc_pos: int = 0
+        self._dut_input_enc_pos:  int = 0
 
         self.create_subscription(StringMsg, "/dyno/main_drive/status",
             lambda msg: self._on_status(msg, "main"), 10)
@@ -501,6 +514,7 @@ class DynoCommander(Node):
                                       data.get("min_position", 0))),
             "max_position":     float(data.get("max_position_rad",
                                       data.get("max_position", 0))),
+            "max_current_a":     float(data.get("max_current_a", 0.0)),
             "torque_kp":  float(data.get("torque_kp",  0.0)),
             "torque_max": float(data.get("torque_max", 0.0)),
             "torque_min": float(data.get("torque_min", 0.0)),
@@ -513,15 +527,21 @@ class DynoCommander(Node):
         }
         error_code = int(data.get("err", 0))
         al_state   = str(data.get("al", "?"))
+        output_pos  = float(data.get("output_pos_rad", 0.0))
+        input_enc   = int(data.get("in_enc_pos", 0))
         with self._limits_lock:
             if drive == "main":
-                self._main_limits     = limits
-                self._main_error_code = error_code
-                self._main_al_state   = al_state
+                self._main_limits         = limits
+                self._main_error_code     = error_code
+                self._main_al_state       = al_state
+                self._main_output_pos_rad = output_pos
+                self._main_input_enc_pos  = input_enc
             else:
-                self._dut_limits      = limits
-                self._dut_error_code  = error_code
-                self._dut_al_state    = al_state
+                self._dut_limits          = limits
+                self._dut_error_code      = error_code
+                self._dut_al_state        = al_state
+                self._dut_output_pos_rad  = output_pos
+                self._dut_input_enc_pos   = input_enc
         if self._limits_callback:
             self._limits_callback(drive)
 
@@ -564,12 +584,22 @@ class DynoCommander(Node):
         with self._limits_lock:
             return self._ch1_scale_nm if channel == "ch1" else self._ch2_scale_nm
 
+    def get_output_pos_rad(self, drive: str) -> float:
+        """Return the latest output-side encoder position (rad) for 'main' or 'dut'."""
+        with self._limits_lock:
+            return self._main_output_pos_rad if drive == "main" else self._dut_output_pos_rad
+
+    def get_input_enc_pos_raw(self, drive: str) -> int:
+        """Return the latest input-side encoder position (raw counts, 0x204A) for 'main' or 'dut'."""
+        with self._limits_lock:
+            return self._main_input_enc_pos if drive == "main" else self._dut_input_enc_pos
+
     def set_limits_callback(self, cb) -> None:
         self._limits_callback = cb
 
     def get_limits(self, field_key: str):
         """Return (min, max, default) for a command field, or None if unavailable.
-        Gain fields return floats; velocity/position return floats in natural units."""
+        Gain fields return floats; setpoints return floats in natural units."""
         if field_key.startswith("main_"):
             with self._limits_lock:
                 limits = dict(self._main_limits)
@@ -596,6 +626,12 @@ class DynoCommander(Node):
             if hi >= 1e9:
                 hi = _NO_LIMIT
             return (lo, hi, 0.0)
+        elif field_type == "current":
+            max_current = limits.get("max_current_a", 0.0)
+            if max_current > 0.0:
+                return (-max_current, max_current, 0.0)
+            return (-CURRENT_COMMAND_FALLBACK_LIMIT_A,
+                    CURRENT_COMMAND_FALLBACK_LIMIT_A, 0.0)
         elif field_type == "torque_min":
             current = limits.get(field_type, 0.0)
             return (-20.0, 0.0, current)   # negative clamp — must allow negative
@@ -664,6 +700,8 @@ class DynoCommander(Node):
     def _publish(self):
         with self._lock:
             payload = dict(self._numeric)
+            payload["main_iqcommand"]    = payload.get("main_current", 0.0)
+            payload["dut_iqcommand"]     = payload.get("dut_current", 0.0)
             payload["main_enable"]       = self._main_enable
             payload["dut_enable"]        = self._dut_enable
             payload["fault_reset"]       = self._fault_reset
@@ -728,6 +766,7 @@ class SliderSlot(QGroupBox):
         super().__init__(SliderSlot._PLACEHOLDER, parent)
         self._field: str | None = None
         self._float_mode        = False
+        self._scale: float      = 1.0
         self._on_drop          = on_drop           # (key) -> (min,max,default) | None
         self._is_field_allowed = is_field_allowed  # (key) -> bool
         self._on_assigned      = on_assigned       # (key) -> None
@@ -770,11 +809,16 @@ class SliderSlot(QGroupBox):
         self._float_spin = QDoubleSpinBox()
         self._float_spin.setKeyboardTracking(False)
         self._float_spin.setRange(0.0, 20.0)
-        self._float_spin.setSingleStep(0.001)
-        self._float_spin.setDecimals(3)
+        self._float_spin.setSingleStep(0.000001)
+        self._float_spin.setDecimals(6)
         self._float_spin.setValue(0.0)
+        self._float_spin.wheelEvent = lambda e: e.ignore()
         self._float_spin.hide()
         self._committed_float: float = 0.0
+
+        # Scale display (shows ×1,000 or ×1,000,000 after a drop)
+        self._scale_label = QLabel("")
+        self._scale_label.setAlignment(Qt.AlignCenter)
 
         # Value display
         self._val_label = QLabel("0")
@@ -785,6 +829,7 @@ class SliderSlot(QGroupBox):
         self._clear_btn.clicked.connect(self._unassign)
 
         col = QVBoxLayout(self)
+        col.addWidget(self._scale_label)
         col.addWidget(self._max_spin)
         col.addWidget(self._slider, 1, Qt.AlignHCenter)
         col.addWidget(self._float_spin)
@@ -824,7 +869,7 @@ class SliderSlot(QGroupBox):
     # ── value sync ────────────────────────────────────────────────────────────
 
     def _on_slider_moved(self, v: int):
-        self._val_label.setText(str(v))
+        self._val_label.setText(f"{v / self._scale:.3f}")
         self._exact_spin.blockSignals(True)
         self._exact_spin.setValue(v)
         self._exact_spin.blockSignals(False)
@@ -833,11 +878,11 @@ class SliderSlot(QGroupBox):
         self._slider.blockSignals(True)
         self._slider.setValue(v)
         self._slider.blockSignals(False)
-        self._val_label.setText(str(v))
+        self._val_label.setText(f"{v / self._scale:.3f}")
 
     def _on_float_changed(self, v: float):
         self._committed_float = v
-        self._val_label.setText(f"{v:.3f}")
+        self._val_label.setText(f"{v / self._scale:.6f}")
 
     # ── float mode ────────────────────────────────────────────────────────────
 
@@ -853,7 +898,7 @@ class SliderSlot(QGroupBox):
         self._float_spin.setValue(default)
         self._committed_float = default
         self._float_spin.blockSignals(False)
-        self._val_label.setText(f"{default:.3f}")
+        self._val_label.setText(f"{default / self._scale:.6f}")
         self._float_spin.show()
 
     def clear_float_mode(self):
@@ -889,27 +934,27 @@ class SliderSlot(QGroupBox):
             result = self._on_drop(key)
             if result is not None:
                 lo, hi, default = result
-                if key in GAIN_FIELDS:
-                    self.set_float_mode(lo, hi, default)
-                else:
-                    self.clear_float_mode()
-                    # Block signals to avoid cross-clamping during bulk update.
-                    for w in (self._min_spin, self._max_spin,
-                              self._slider, self._exact_spin):
-                        w.blockSignals(True)
-                    lo_i, hi_i, def_i = int(lo), int(hi), int(default)
-                    self._min_spin.setValue(lo_i)
-                    self._max_spin.setValue(hi_i)
-                    self._slider.setMinimum(lo_i)
-                    self._slider.setMaximum(hi_i)
-                    self._exact_spin.setMinimum(lo_i)
-                    self._exact_spin.setMaximum(hi_i)
-                    self._slider.setValue(def_i)
-                    self._exact_spin.setValue(def_i)
-                    self._val_label.setText(str(def_i))
-                    for w in (self._min_spin, self._max_spin,
-                              self._slider, self._exact_spin):
-                        w.blockSignals(False)
+                self._scale = 1_000_000.0 if key in GAIN_FIELDS else 1_000.0
+                sc = self._scale
+                self._scale_label.setText(f"×{int(sc):,}")
+                lo_s, hi_s, def_s = lo * sc, hi * sc, default * sc
+                self.clear_float_mode()
+                for w in (self._min_spin, self._max_spin,
+                          self._slider, self._exact_spin):
+                    w.blockSignals(True)
+                lo_i, hi_i, def_i = int(lo_s), int(hi_s), int(def_s)
+                self._min_spin.setValue(lo_i)
+                self._max_spin.setValue(hi_i)
+                self._slider.setMinimum(lo_i)
+                self._slider.setMaximum(hi_i)
+                self._exact_spin.setMinimum(lo_i)
+                self._exact_spin.setMaximum(hi_i)
+                self._slider.setValue(def_i)
+                self._exact_spin.setValue(def_i)
+                self._val_label.setText(f"{def_i / sc:.3f}")
+                for w in (self._min_spin, self._max_spin,
+                          self._slider, self._exact_spin):
+                    w.blockSignals(False)
         ev.acceptProposedAction()
 
     def contextMenuEvent(self, ev):
@@ -938,6 +983,8 @@ class SliderSlot(QGroupBox):
     def _unassign(self):
         old = self._field
         self._field = None
+        self._scale = 1.0
+        self._scale_label.setText("")
         self.setTitle(SliderSlot._PLACEHOLDER)
         self.clear_float_mode()
         self._slider.setValue(0)
@@ -961,10 +1008,9 @@ class SliderSlot(QGroupBox):
 
     @property
     def value(self):
-        """Return float if in gain mode, int otherwise."""
         if self._float_mode:
-            return self._committed_float
-        return self._slider.value()
+            return self._committed_float / self._scale
+        return self._slider.value() / self._scale
 
     def zero(self):
         if self._float_mode:
@@ -975,12 +1021,13 @@ class SliderSlot(QGroupBox):
 
     def apply_limits(self, lo: float, hi: float):
         """Update slider range without resetting the current value (integer mode only)."""
+        sc = self._scale
         if self._float_mode:
             self._float_spin.blockSignals(True)
-            self._float_spin.setRange(lo, hi)
+            self._float_spin.setRange(lo * sc, hi * sc)
             self._float_spin.blockSignals(False)
             return
-        lo_i, hi_i = int(lo), int(hi)
+        lo_i, hi_i = int(lo * sc), int(hi * sc)
         for w in (self._min_spin, self._max_spin, self._slider, self._exact_spin):
             w.blockSignals(True)
         self._min_spin.setValue(lo_i)
@@ -1021,7 +1068,7 @@ class SpinboxSlot(QGroupBox):
 
         self._spin = QDoubleSpinBox()
         self._spin.setRange(-1e9, 1e9)
-        self._spin.setDecimals(3)
+        self._spin.setDecimals(4)
         self._spin.setSingleStep(1.0)
         self._spin.setValue(0.0)
         self._spin.setKeyboardTracking(False)
@@ -1065,8 +1112,8 @@ class SpinboxSlot(QGroupBox):
                 lo, hi, default = result
                 is_gain = key in GAIN_FIELDS
                 self._spin.blockSignals(True)
-                self._spin.setDecimals(3 if is_gain else 1)
-                self._spin.setSingleStep(0.001 if is_gain else 1.0)
+                self._spin.setDecimals(6 if is_gain else 3)
+                self._spin.setSingleStep(0.000001 if is_gain else 0.001)
                 self._spin.setRange(lo, hi)
                 self._spin.setValue(float(default))
                 self._committed = float(default)
@@ -1414,16 +1461,25 @@ class ScriptingPanel(QGroupBox):
 
 class DynoWindow(QMainWindow):
 
-    def __init__(self, commander: DynoCommander, scripts_dir: str = TEST_SCRIPTS_DIR):
+    def __init__(self, commander: DynoCommander, scripts_dir: str = TEST_SCRIPTS_DIR,
+                 bridge_proc=None, bridge_args=None):
         super().__init__()
         self._cmd            = commander
         self._scripts_dir    = scripts_dir
+        self._bridge_proc    = bridge_proc
+        self._bridge_args    = bridge_args
         self._main_enabled   = False
         self._dut_enabled    = False
         self._hold_output1   = False
         self._script_running = False
         self._ch1_scale: int = 200   # Nm — matches El3002Adapter ch1 default
         self._ch2_scale: int = 20    # Nm — matches El3002Adapter ch2 default
+
+        def _fg_default():
+            return {"enable": False, "waveform": 0, "control_type": 0,
+                    "amplitude": 0.0, "frequency": 1.0, "offset": 0.0, "phase": 0.0,
+                    "chirp_f_low": 0.1, "chirp_f_high": 10.0, "chirp_dur": 10.0}
+        self._fg_state       = {"main": _fg_default(), "dut": _fg_default()}
 
         self.setWindowTitle("Dyno Control")
         self._build_ui()
@@ -1445,16 +1501,37 @@ class DynoWindow(QMainWindow):
         self._error_timer.timeout.connect(self._refresh_all_errors)
         self._error_timer.start(500)   # 2 Hz
 
+        self._bridge_poll_timer = QTimer(self)
+        self._bridge_poll_timer.setInterval(500)
+        self._bridge_poll_timer.timeout.connect(self._poll_bridge)
+        self._bridge_poll_timer.start()
+        self._update_bridge_status()
+
     def showEvent(self, event):
         super().showEvent(event)
         if not hasattr(self, '_initially_sized'):
             self._initially_sized = True
-            QTimer.singleShot(50, self._fit_window_to_content)
+            QTimer.singleShot(50, self._apply_initial_window_size)
+
+    def _target_startup_width(self) -> int:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return STARTUP_WINDOW_WIDTH
+        # Keep a little horizontal headroom for the window manager decorations.
+        return min(STARTUP_WINDOW_WIDTH, max(200, screen.availableGeometry().width() - 40))
+
+    def _apply_initial_window_size(self):
+        # Some window managers restore the last maximized state unless we
+        # explicitly put the window back into normal mode before sizing it.
+        if self.isMaximized():
+            self.showNormal()
+        self.resize(self._target_startup_width(), STARTUP_WINDOW_HEIGHT)
+        self._fit_window_to_content()
 
     def _fit_window_to_content(self):
         """Resize height to content after first layout pass (actual sizes known)."""
         h = self.centralWidget().sizeHint().height()
-        screen = QApplication.primaryScreen()
+        screen = self.screen() or QApplication.primaryScreen()
         if screen is not None:
             # Leave a little headroom for the window frame/title bar.
             h = min(h, max(200, screen.availableGeometry().height() - 360))
@@ -1705,6 +1782,7 @@ class DynoWindow(QMainWindow):
         dut_fault_lay.addWidget(self._dut_fault_history)
 
         btn_lay.addWidget(dut_fault_group)
+        btn_lay.addStretch(1)
 
         # ── Scripting panel ───────────────────────────────────────────────────
         self._script_panel = ScriptingPanel(
@@ -1826,12 +1904,175 @@ class DynoWindow(QMainWindow):
         self._bus_status_panel.setReadOnly(True)
         _bus_font = QFont("Monospace"); _bus_font.setPointSize(8)
         self._bus_status_panel.setFont(_bus_font)
-        self._bus_status_panel.setMinimumHeight(60)
+        self._bus_status_panel.setFixedHeight(200)
         self._bus_status_panel.setLineWrapMode(QTextEdit.NoWrap)
         self._bus_status_panel.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._bus_status_panel.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._bus_status_panel.setPlaceholderText("(waiting for bridge)")
-        ecat_lay.addWidget(self._bus_status_panel, 1)
+        ecat_lay.addWidget(self._bus_status_panel)
+
+        # ── Function Generator ────────────────────────────────────────────────
+        fg_group = QGroupBox("Function Generator")
+        fg_lay   = QVBoxLayout(fg_group)
+        fg_lay.setSpacing(3)
+        fg_lay.setContentsMargins(6, 6, 6, 6)
+
+        # Drive selector + Enable checkbox
+        fg_head = QHBoxLayout()
+        self._fg_drive_combo = QComboBox()
+        self._fg_drive_combo.addItem("Main", "main")
+        self._fg_drive_combo.addItem("DUT",  "dut")
+        fg_head.addWidget(self._fg_drive_combo)
+        self._fg_enable_chk = QCheckBox("Enable FG")
+        fg_head.addWidget(self._fg_enable_chk)
+        fg_lay.addLayout(fg_head)
+
+        # Control type
+        fg_ct = QHBoxLayout()
+        fg_ct.addWidget(QLabel("Control:"))
+        self._fg_ctrl_combo = QComboBox()
+        for _name, _val in [("None", 0), ("Velocity", 1), ("Position", 2),
+                             ("Torque", 3), ("Current", 4)]:
+            self._fg_ctrl_combo.addItem(_name, _val)
+        fg_ct.addWidget(self._fg_ctrl_combo)
+        fg_lay.addLayout(fg_ct)
+
+        # Changing control type → auto-update the DS402 mode combo for the
+        # selected drive so the JSON main_mode always agrees with apply_fg.
+        _FG_CT_TO_MODE_COMBO = {
+            1: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 9),   # Velocity → CSV
+            2: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 8),   # Position → CSP
+            3: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 10),  # Torque   → CST
+            4: next(i for i, (_, v) in enumerate(DS402_MODES) if v == -2),  # Current  → current mode
+        }
+
+        def _fg_on_ctrl_type(idx):
+            if idx not in _FG_CT_TO_MODE_COMBO:
+                return  # NONE (0) — leave mode combo unchanged
+            mode_idx = _FG_CT_TO_MODE_COMBO[idx]
+            drive = self._fg_drive_combo.currentData()
+            combo = self._main_mode_combo if drive == "main" else self._dut_mode_combo
+            combo.setCurrentIndex(mode_idx)
+
+        def _fg_on_enable(state):
+            if state:  # on check — sync mode combo to current control type
+                _fg_on_ctrl_type(self._fg_ctrl_combo.currentIndex())
+
+        self._fg_ctrl_combo.currentIndexChanged.connect(_fg_on_ctrl_type)
+        self._fg_enable_chk.stateChanged.connect(_fg_on_enable)
+
+        # Waveform
+        fg_wf = QHBoxLayout()
+        fg_wf.addWidget(QLabel("Waveform:"))
+        self._fg_wf_combo = QComboBox()
+        for _name in ["OFF", "DC", "Sine", "Square", "Triangle",
+                      "Sawtooth", "Noise", "Chirp", "Exp Chirp"]:
+            self._fg_wf_combo.addItem(_name)
+        fg_wf.addWidget(self._fg_wf_combo)
+        fg_lay.addLayout(fg_wf)
+
+        # Parameter rows — shown/hidden based on waveform
+        def _fg_param_row(label, lo, hi, decimals, step, suffix=""):
+            w   = QWidget()
+            row = QHBoxLayout(w)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(4)
+            lbl = QLabel(label)
+            lbl.setFixedWidth(62)
+            sb  = QDoubleSpinBox()
+            sb.setRange(lo, hi)
+            sb.setDecimals(decimals)
+            sb.setSingleStep(step)
+            sb.setKeyboardTracking(False)
+            if suffix:
+                sb.setSuffix(suffix)
+            row.addWidget(lbl)
+            row.addWidget(sb)
+            return w, sb
+
+        self._fg_amp_row,          self._fg_amp_spin          = _fg_param_row("Amplitude:", 0,      1e6,    3, 1.0)
+        self._fg_freq_row,         self._fg_freq_spin         = _fg_param_row("Frequency:", 0,      1e4,    3, 0.1,  " Hz")
+        self._fg_off_row,          self._fg_off_spin          = _fg_param_row("Offset:",    -1e6,   1e6,    3, 0.1)
+        self._fg_phase_row,        self._fg_phase_spin        = _fg_param_row("Phase:",     -6.2832, 6.2832, 4, 0.01, " rad")
+        self._fg_chirp_f_low_row,  self._fg_chirp_f_low_spin  = _fg_param_row("f start:",  0.001,  1e4,    3, 0.1,  " Hz")
+        self._fg_chirp_f_high_row, self._fg_chirp_f_high_spin = _fg_param_row("f end:",    0.001,  1e4,    3, 0.1,  " Hz")
+        self._fg_chirp_dur_row,    self._fg_chirp_dur_spin    = _fg_param_row("Duration:", 0.1,    1e4,    1, 1.0,  " s")
+
+        for _w in (self._fg_amp_row, self._fg_freq_row, self._fg_off_row,
+                   self._fg_phase_row, self._fg_chirp_f_low_row,
+                   self._fg_chirp_f_high_row, self._fg_chirp_dur_row):
+            fg_lay.addWidget(_w)
+
+        _FG_PARAMS_VISIBLE = {
+            0: [],
+            1: ["offset"],
+            2: ["amplitude", "frequency", "offset", "phase"],
+            3: ["amplitude", "frequency", "offset", "phase"],
+            4: ["amplitude", "frequency", "offset", "phase"],
+            5: ["amplitude", "frequency", "offset", "phase"],
+            6: ["amplitude", "offset"],
+            7: ["amplitude", "chirp_f_low", "chirp_f_high", "chirp_dur", "offset", "phase"],
+            8: ["amplitude", "chirp_f_low", "chirp_f_high", "chirp_dur", "offset", "phase"],
+        }
+        _fg_param_map = {
+            "amplitude":   self._fg_amp_row,
+            "frequency":   self._fg_freq_row,
+            "offset":      self._fg_off_row,
+            "phase":       self._fg_phase_row,
+            "chirp_f_low": self._fg_chirp_f_low_row,
+            "chirp_f_high":self._fg_chirp_f_high_row,
+            "chirp_dur":   self._fg_chirp_dur_row,
+        }
+
+        def _fg_update_params(wf_idx):
+            visible = _FG_PARAMS_VISIBLE.get(wf_idx, [])
+            for _k, _w in _fg_param_map.items():
+                _w.setVisible(_k in visible)
+
+        self._fg_wf_combo.currentIndexChanged.connect(_fg_update_params)
+        _fg_update_params(0)
+
+        # Drive switch — save current drive state, load new drive state
+        def _fg_save_current():
+            drive = self._fg_drive_combo.currentData()
+            st = self._fg_state[drive]
+            st["enable"]       = self._fg_enable_chk.isChecked()
+            st["waveform"]     = self._fg_wf_combo.currentIndex()
+            st["control_type"] = self._fg_ctrl_combo.currentIndex()
+            st["amplitude"]    = self._fg_amp_spin.value()
+            st["frequency"]    = self._fg_freq_spin.value()
+            st["offset"]       = self._fg_off_spin.value()
+            st["phase"]        = self._fg_phase_spin.value()
+            st["chirp_f_low"]  = self._fg_chirp_f_low_spin.value()
+            st["chirp_f_high"] = self._fg_chirp_f_high_spin.value()
+            st["chirp_dur"]    = self._fg_chirp_dur_spin.value()
+
+        def _fg_load(drive):
+            st = self._fg_state[drive]
+            for _w in (self._fg_enable_chk, self._fg_wf_combo, self._fg_ctrl_combo):
+                _w.blockSignals(True)
+            self._fg_enable_chk.setChecked(st["enable"])
+            self._fg_wf_combo.setCurrentIndex(st["waveform"])
+            self._fg_ctrl_combo.setCurrentIndex(st["control_type"])
+            self._fg_amp_spin.setValue(st["amplitude"])
+            self._fg_freq_spin.setValue(st["frequency"])
+            self._fg_off_spin.setValue(st["offset"])
+            self._fg_phase_spin.setValue(st["phase"])
+            self._fg_chirp_f_low_spin.setValue(st["chirp_f_low"])
+            self._fg_chirp_f_high_spin.setValue(st["chirp_f_high"])
+            self._fg_chirp_dur_spin.setValue(st["chirp_dur"])
+            for _w in (self._fg_enable_chk, self._fg_wf_combo, self._fg_ctrl_combo):
+                _w.blockSignals(False)
+            _fg_update_params(st["waveform"])
+
+        self._fg_save_current = _fg_save_current
+        self._fg_load         = _fg_load
+
+        self._fg_drive_combo.currentIndexChanged.connect(
+            lambda _: (_fg_save_current(), _fg_load(self._fg_drive_combo.currentData())))
+
+        ecat_lay.addWidget(fg_group)
+        ecat_lay.addStretch(1)
 
         right_lay.addWidget(btn_w)
         right_lay.addWidget(self._script_panel, 1)
@@ -1856,9 +2097,36 @@ class DynoWindow(QMainWindow):
         splitter.setStretchFactor(2, 0)
         splitter.setFixedHeight(max(200, _content_h - 15))
 
-        # ── Status label ───────────────────────────────────────────────────────
+        # ── Bottom status / bridge row ────────────────────────────────────────
+        status_row = QWidget()
+        status_lay = QHBoxLayout(status_row)
+        status_lay.setContentsMargins(6, 2, 6, 2)
+        status_lay.setSpacing(8)
+
         self._status_label = QLabel("bridge_ros2 starting…")
         self._status_label.setAlignment(Qt.AlignCenter)
+        status_lay.addWidget(self._status_label, 1)
+
+        self._bridge_status_lbl = QLabel("Bridge: ○ Stopped")
+        self._bridge_status_lbl.setFont(QFont("Monospace", 8))
+        status_lay.addWidget(self._bridge_status_lbl)
+
+        self._bridge_start_btn   = QPushButton("Start")
+        self._bridge_stop_btn    = QPushButton("Stop")
+        self._bridge_restart_btn = QPushButton("Restart")
+        status_lay.addWidget(self._bridge_start_btn)
+        status_lay.addWidget(self._bridge_stop_btn)
+        status_lay.addWidget(self._bridge_restart_btn)
+
+        self._bridge_start_btn.clicked.connect(self._on_bridge_start)
+        self._bridge_stop_btn.clicked.connect(self._on_bridge_stop)
+        self._bridge_restart_btn.clicked.connect(self._on_bridge_restart)
+
+        if self._bridge_args is None:
+            for _b in (self._bridge_start_btn, self._bridge_stop_btn,
+                       self._bridge_restart_btn):
+                _b.setEnabled(False)
+                _b.setToolTip("Bridge not managed by GUI")
 
         # ── Central widget ─────────────────────────────────────────────────────
         central = QWidget()
@@ -1867,11 +2135,11 @@ class DynoWindow(QMainWindow):
         vlay.setSpacing(0)
         vlay.addWidget(splitter)
         vlay.addWidget(spin_area)
-        vlay.addWidget(self._status_label)
+        vlay.addWidget(status_row)
         self.setCentralWidget(central)
 
         # Rough initial width; height corrected after first layout pass.
-        self.resize(self.sizeHint().width() or 1200, 360)
+        self.resize(STARTUP_WINDOW_WIDTH, STARTUP_WINDOW_HEIGHT)
 
     # ── button callbacks ──────────────────────────────────────────────────────
 
@@ -1958,13 +2226,38 @@ class DynoWindow(QMainWindow):
                 numeric[slot.field] = slot.value
         numeric["ch1_torque_scale"] = self._ch1_scale
         numeric["ch2_torque_scale"] = self._ch2_scale
+
+        # Sync current widget values into fg_state for the selected drive, then
+        # include both drives' FG fields so the bridge always gets a full update.
+        self._fg_save_current()
+        for _drive in ("main", "dut"):
+            _st    = self._fg_state[_drive]
+            _pfx   = f"{_drive}_fg"
+            numeric[f"{_pfx}_enable"]       = _st["enable"]
+            numeric[f"{_pfx}_waveform"]     = _st["waveform"]
+            numeric[f"{_pfx}_control_type"] = _st["control_type"]
+            numeric[f"{_pfx}_amplitude"]    = _st["amplitude"]
+            numeric[f"{_pfx}_frequency"]    = _st["frequency"]
+            numeric[f"{_pfx}_offset"]       = _st["offset"]
+            numeric[f"{_pfx}_phase"]        = _st["phase"]
+            numeric[f"{_pfx}_chirp_f_low"]  = _st["chirp_f_low"]
+            numeric[f"{_pfx}_chirp_f_high"] = _st["chirp_f_high"]
+            numeric[f"{_pfx}_chirp_dur"]    = _st["chirp_dur"]
+
+        # Mode comes directly from the DS402 mode combos, which are auto-synced
+        # by _fg_on_ctrl_type when the FG control type changes.  The RT
+        # callback's apply_fg is the per-cycle enforcer; NO_MODE on FG disable
+        # is handled there as well.
+        main_mode_val = DS402_MODES[self._main_mode_combo.currentIndex()][1]
+        dut_mode_val  = DS402_MODES[self._dut_mode_combo.currentIndex()][1]
+
         self._cmd.set_command(
             numeric      = numeric,
             main_enable  = self._main_enabled,
             dut_enable   = self._dut_enabled,
             hold_output1 = self._hold_output1,
-            main_mode    = DS402_MODES[self._main_mode_combo.currentIndex()][1],
-            dut_mode     = DS402_MODES[self._dut_mode_combo.currentIndex()][1],
+            main_mode    = main_mode_val,
+            dut_mode     = dut_mode_val,
         )
 
     # ── SDO handlers ──────────────────────────────────────────────────────────
@@ -2233,6 +2526,67 @@ class DynoWindow(QMainWindow):
             time.sleep(0.15)
         event.accept()
 
+    # ── Bridge management ─────────────────────────────────────────────────────
+
+    def _stop_bridge(self):
+        """Send SIGINT to bridge, wait up to 5 s, then kill. No-op if not running."""
+        proc = self._bridge_proc
+        if proc is None or proc.poll() is not None:
+            return
+        print(f"[dyno_gui] Sending SIGINT to bridge_ros2 (PID {proc.pid})…")
+        proc.send_signal(signal.SIGINT)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        print("[dyno_gui] bridge_ros2 stopped.")
+        self._bridge_proc = None
+
+    def _on_bridge_start(self):
+        if self._bridge_proc and self._bridge_proc.poll() is None:
+            return
+        a = self._bridge_args
+        self._bridge_proc = launch_bridge(
+            a.bridge, a.topology, a.fault_reset_s, a.pub_hz, a.debug)
+        self._update_bridge_status()
+
+    def _on_bridge_stop(self):
+        self._stop_bridge()
+        self._update_bridge_status()
+
+    def _on_bridge_restart(self):
+        self._stop_bridge()
+        time.sleep(0.5)
+        self._on_bridge_start()
+
+    def _update_bridge_status(self):
+        if self._bridge_args is None:
+            return
+        proc = self._bridge_proc
+        if proc is None or proc.poll() is not None:
+            self._bridge_status_lbl.setText("Bridge: ○ Stopped")
+            self._bridge_start_btn.setEnabled(True)
+            self._bridge_stop_btn.setEnabled(False)
+            self._bridge_restart_btn.setEnabled(False)
+        else:
+            self._bridge_status_lbl.setText(f"Bridge: ● PID {proc.pid}")
+            self._bridge_start_btn.setEnabled(False)
+            self._bridge_stop_btn.setEnabled(True)
+            self._bridge_restart_btn.setEnabled(True)
+
+    def _poll_bridge(self):
+        if self._bridge_args is None:
+            return
+        proc = self._bridge_proc
+        if proc is not None and proc.poll() is not None:
+            self._bridge_proc = None
+            self._bridge_status_lbl.setText(
+                f"Bridge: ✕ Crashed (exit {proc.returncode})")
+            self.set_status(f"bridge_ros2 exited unexpectedly (code {proc.returncode})")
+            self._bridge_start_btn.setEnabled(True)
+            self._bridge_stop_btn.setEnabled(False)
+            self._bridge_restart_btn.setEnabled(False)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Bridge subprocess management
@@ -2301,8 +2655,8 @@ def main():
 
     # ── Qt GUI ────────────────────────────────────────────────────────────────
     app    = QApplication(sys.argv)
-    window = DynoWindow(commander)
-    window.resize(1400, 360)
+    window = DynoWindow(commander, bridge_proc=bridge_proc, bridge_args=args)
+    window.resize(STARTUP_WINDOW_WIDTH, STARTUP_WINDOW_HEIGHT)
 
     if bridge_proc is not None:
         window.set_status(f"bridge_ros2 PID {bridge_proc.pid}")
@@ -2323,14 +2677,7 @@ def main():
 
     rclpy.shutdown()
 
-    if bridge_proc is not None:
-        print(f"[dyno_gui] Sending SIGINT to bridge_ros2 (PID {bridge_proc.pid})…")
-        bridge_proc.send_signal(signal.SIGINT)
-        try:
-            bridge_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            bridge_proc.kill()
-        print("[dyno_gui] bridge_ros2 stopped.")
+    window._stop_bridge()
 
     sys.exit(exit_code)
 

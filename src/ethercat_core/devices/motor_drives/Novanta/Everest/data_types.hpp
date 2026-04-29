@@ -15,6 +15,7 @@ struct Command {
     float           target_velocity_mrevs    = 0.0f;  // 0x60FF, unit: mrev/s
     float           target_position__enc_cnt = 0.0f;  // 0x607A, unit: raw encoder counts
     float           torque_command_2022    = 0.0f;  // 0x2022 direct torque
+    float           iq_setpoint_a          = 0.0f;  // 0x201A current quadrature set-point
     float           torque_kp              = 0.0f;  // 0x2523
     float           torque_loop_max_output = 0.0f;  // 0x2527
     float           torque_loop_min_output = 0.0f;  // 0x2528

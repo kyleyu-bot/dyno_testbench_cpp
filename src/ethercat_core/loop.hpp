@@ -35,7 +35,7 @@ public:
     // Callback invoked from the RT thread after every completed cycle.
     // Must be fast and non-blocking (no I/O, no heavy allocation).
     // status and stats reflect the cycle just completed.
-    using CycleCallback = std::function<void(const SystemStatus&, const LoopStats&)>;
+    using CycleCallback = std::function<SystemCommand(const SystemStatus&, const LoopStats&)>;
 
     explicit EthercatLoop(
         MasterRuntime&  runtime,

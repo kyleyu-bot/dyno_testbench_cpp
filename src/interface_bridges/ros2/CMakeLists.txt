@@ -29,7 +29,8 @@ set(DYNO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 # Adjust DYNO_BUILD_DIR if your build folder is named differently.
 set(DYNO_BUILD_DIR "${DYNO_ROOT}/build")
 
-find_library(ETHERCAT_CORE_LIB ethercat_core HINTS "${DYNO_BUILD_DIR}/src/ethercat_core")
+find_library(ETHERCAT_CORE_LIB  ethercat_core  HINTS "${DYNO_BUILD_DIR}/src/ethercat_core")
+find_library(TESTBENCH_UTILS_LIB testbench_utils HINTS "${DYNO_BUILD_DIR}/src/testbench_utils")
 find_library(SOEM_LIB          soem          HINTS "${DYNO_BUILD_DIR}/_deps/soem-build")
 
 set(SOEM_INCLUDE_DIRS
@@ -42,10 +43,15 @@ set(SOEM_INCLUDE_DIRS
 set(JSON_INCLUDE_DIR "${DYNO_BUILD_DIR}/_deps/nlohmann_json-src/include")
 
 # ── bridge_ros2 executable ────────────────────────────────────────────────────
-add_executable(bridge_ros2 bridge_ros2.cpp)
+add_executable(bridge_ros2
+    bridge_ros2.cpp
+    "${DYNO_ROOT}/src/testbenches/dual_novanta_testbench/dual_novanta_testbench.cpp"
+)
 
 target_include_directories(bridge_ros2 PRIVATE
     "${DYNO_ROOT}/src"
+    "${DYNO_ROOT}/src/testbenches"
+    "${DYNO_ROOT}/src/interface_bridges/ros2"
     ${SOEM_INCLUDE_DIRS}
     ${JSON_INCLUDE_DIR}
 )
@@ -57,6 +63,7 @@ ament_target_dependencies(bridge_ros2
 
 target_link_libraries(bridge_ros2
     ${ETHERCAT_CORE_LIB}
+    ${TESTBENCH_UTILS_LIB}
     ${SOEM_LIB}
     quill::quill
     pthread

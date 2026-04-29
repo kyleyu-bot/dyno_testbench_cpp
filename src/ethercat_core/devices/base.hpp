@@ -3,6 +3,7 @@
 #include <any>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ethercat_core {
@@ -49,6 +50,12 @@ public:
         int64_t        cycle_time_ns = 0,
         int64_t        dc_error_ns   = 0
     ) = 0;
+
+    // Optional startup hooks — override in drive adapters that need SDO reads at pre-OP.
+    // Default implementations are no-ops so non-drive adapters (I/O modules) need not override.
+    virtual std::unordered_map<std::string, SdoReadSpec> startupReadSpecs() const { return {}; }
+    virtual void computeGearRatio(float /*sensor_ratio*/) {}
+    virtual void applyLimits(float /*max_vel*/, float /*min_pos*/, float /*max_pos*/) {}
 
     const SlaveIdentity& identity() const { return identity_; }
 
