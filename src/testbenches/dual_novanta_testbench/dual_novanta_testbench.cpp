@@ -1,7 +1,7 @@
 #include "dual_novanta_testbench.hpp"
 
 #include "ethercat_core/devices/beckhoff/el2004/data_types.hpp"
-#include "ethercat_core/devices/beckhoff/el3002/data_types.hpp"
+#include "ethercat_core/devices/beckhoff/elm3002/data_types.hpp"
 #include "ethercat_core/devices/beckhoff/el5032/data_types.hpp"
 #include "ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp"
 
@@ -32,7 +32,7 @@ DualNovantaTestbench::DualNovantaTestbench(
     const std::string& torque_slave,
     const std::string& io_slave,
     bool               dut_present,
-    beckhoff::el3002::El3002Adapter* el3002,
+    beckhoff::elm3002::Elm3002Adapter* elm3002,
     int  drive_soem_idx,
     int  dut_soem_idx,
     int  main_out_enc_bits,
@@ -43,7 +43,7 @@ DualNovantaTestbench::DualNovantaTestbench(
     , torque_slave_(torque_slave)
     , io_slave_(io_slave)
     , dut_present_(dut_present)
-    , el3002_(el3002)
+    , elm3002_(elm3002)
     , drive_soem_idx_(drive_soem_idx)
     , dut_soem_idx_(dut_soem_idx)
     , main_out_enc_bits_(main_out_enc_bits)
@@ -387,9 +387,9 @@ EthercatLoop::CycleCallback DualNovantaTestbench::makeCallback(
 
         auto torque_it = status.by_slave.find(torque_slave_);
         if (torque_it != status.by_slave.end() && torque_it->second.has_value()) {
-            const auto& d = std::any_cast<const beckhoff::el3002::Data&>(torque_it->second);
-            rec.torque_ch1_nm = el3002_->scaledTorqueCh1(d);
-            rec.torque_ch2_nm = el3002_->scaledTorqueCh2(d);
+            const auto& d = std::any_cast<const beckhoff::elm3002::Data&>(torque_it->second);
+            rec.torque_ch1_nm = elm3002_->scaledTorqueCh1(d);
+            rec.torque_ch2_nm = elm3002_->scaledTorqueCh2(d);
         }
 
         log_buf.push(rec);

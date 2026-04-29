@@ -34,8 +34,8 @@
 #include "ethercat_core/loop.hpp"
 #include "ethercat_core/master.hpp"
 #include "ethercat_core/default_adapter_factory.hpp"
-#include "ethercat_core/devices/beckhoff/el3002/adapter.hpp"
-#include "ethercat_core/devices/beckhoff/el3002/data_types.hpp"
+#include "ethercat_core/devices/beckhoff/elm3002/adapter.hpp"
+#include "ethercat_core/devices/beckhoff/elm3002/data_types.hpp"
 #include "ethercat_core/devices/beckhoff/el5032/data_types.hpp"
 #include "ethercat_core/devices/motor_drives/Novanta/Volcano/data_types.hpp"
 #include "ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp"
@@ -441,9 +441,9 @@ int main(int argc, char** argv) {
         RCLCPP_WARN(node->get_logger(), "DUT slave '%s' not found — running without DUT.", dut_slave.c_str());
     }
 
-    auto* el3002 = dynamic_cast<beckhoff::el3002::El3002Adapter*>(
+    auto* elm3002 = dynamic_cast<beckhoff::elm3002::Elm3002Adapter*>(
         rt->adapters.at(torque_slave).get());
-    if (!el3002) {
+    if (!elm3002) {
         RCLCPP_FATAL(node->get_logger(), "Slave '%s' is not an ELM3002.", torque_slave.c_str());
         master.close();
         executor->cancel();
@@ -512,7 +512,7 @@ int main(int argc, char** argv) {
 
     DualNovantaTestbench testbench(
         drive_slave, dut_slave, encoder_slave, torque_slave, io_slave,
-        dut_present, el3002,
+        dut_present, elm3002,
         drive_soem_idx, dut_soem_idx,
         main_out_enc_bits, dut_out_enc_bits
     );
@@ -797,8 +797,8 @@ int main(int argc, char** argv) {
         // read/write is naturally atomic, so the worst case is one stale cycle during
         // a user-initiated scale change. Acceptable for an infrequent measurement setting.
         try {
-            el3002->setCh1TorqueScale(cmd.ch1_torque_scale);
-            el3002->setCh2TorqueScale(cmd.ch2_torque_scale);
+            elm3002->setCh1TorqueScale(cmd.ch1_torque_scale);
+            elm3002->setCh2TorqueScale(cmd.ch2_torque_scale);
         } catch (const std::exception& e) {
             RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 5000,
                 "Ignoring invalid torque scale value: %s", e.what());
@@ -850,20 +850,20 @@ int main(int argc, char** argv) {
             double ch1_t = 0.0, ch2_t = 0.0;
             auto torque_it = cur_status.by_slave.find(torque_slave);
             if (torque_it != cur_status.by_slave.end() && torque_it->second.has_value()) {
-                const auto& d = std::any_cast<const beckhoff::el3002::Data&>(torque_it->second);
+                const auto& d = std::any_cast<const beckhoff::elm3002::Data&>(torque_it->second);
                 // Apply one-shot zero before reading, then clear flags in shared state.
                 if (cmd.zero_torque_ch1) {
-                    el3002->zeroTorqueCh1(d);
+                    elm3002->zeroTorqueCh1(d);
                     std::lock_guard<std::mutex> lk(g_cmd_mutex);
                     g_cmd_state.zero_torque_ch1 = false;
                 }
                 if (cmd.zero_torque_ch2) {
-                    el3002->zeroTorqueCh2(d);
+                    elm3002->zeroTorqueCh2(d);
                     std::lock_guard<std::mutex> lk(g_cmd_mutex);
                     g_cmd_state.zero_torque_ch2 = false;
                 }
-                ch1_t = static_cast<double>(el3002->scaledTorqueCh1(d));
-                ch2_t = static_cast<double>(el3002->scaledTorqueCh2(d));
+                ch1_t = static_cast<double>(elm3002->scaledTorqueCh1(d));
+                ch2_t = static_cast<double>(elm3002->scaledTorqueCh2(d));
             }
 
             node->publishTelemetry(

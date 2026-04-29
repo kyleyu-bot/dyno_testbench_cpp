@@ -240,7 +240,7 @@ DS402_MODES = [
 ]
 DS402_DEFAULT_MODE = 9   # Cyclic Sync Velocity
 
-# Allowed torque sensor scale values — must match El3002Adapter::ALLOWED_TORQUE_SCALES
+# Allowed torque sensor scale values — must match Elm3002Adapter::ALLOWED_TORQUE_SCALES
 TORQUE_SCALE_OPTIONS = [20, 200, 500]   # Nm
 CURRENT_COMMAND_FALLBACK_LIMIT_A = 20.0
 
@@ -442,8 +442,8 @@ class DynoCommander(Node):
         # Scales are mirrored from set_command() so scripts can query them.
         self._ch1_torque_nm: float = 0.0
         self._ch2_torque_nm: float = 0.0
-        self._ch1_scale_nm:  float = 200.0   # default, matches El3002Adapter ch1
-        self._ch2_scale_nm:  float = 20.0    # default, matches El3002Adapter ch2
+        self._ch1_scale_nm:  float = 200.0   # default, matches Elm3002Adapter ch1
+        self._ch2_scale_nm:  float = 20.0    # default, matches Elm3002Adapter ch2
 
         # Output-side encoder position (rad, post gear-ratio) from drive status JSON.
         self._main_output_pos_rad: float = 0.0
@@ -1472,8 +1472,8 @@ class DynoWindow(QMainWindow):
         self._dut_enabled    = False
         self._hold_output1   = False
         self._script_running = False
-        self._ch1_scale: int = 200   # Nm — matches El3002Adapter ch1 default
-        self._ch2_scale: int = 20    # Nm — matches El3002Adapter ch2 default
+        self._ch1_scale: int = 200   # Nm — matches Elm3002Adapter ch1 default
+        self._ch2_scale: int = 20    # Nm — matches Elm3002Adapter ch2 default
 
         def _fg_default():
             return {"enable": False, "waveform": 0, "control_type": 0,

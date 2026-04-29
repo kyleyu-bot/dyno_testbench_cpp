@@ -29,7 +29,7 @@ hold_time_s : float
 drive : str
     Which drive to command: "main" or "dut".
 torque_sensor : str
-    EL3002 channel used for the safety check: "ch1" or "ch2".
+    ELM3002 channel used for the safety check: "ch1" or "ch2".
 
 Framework contract (pre/post):
     Before run() — framework has enabled both drives and applied GUI modes.

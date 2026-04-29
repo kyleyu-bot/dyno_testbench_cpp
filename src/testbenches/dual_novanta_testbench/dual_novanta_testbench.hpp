@@ -3,7 +3,7 @@
 #include "ethercat_core/loop.hpp"
 #include "ethercat_core/data_types.hpp"
 #include "ethercat_core/master.hpp"
-#include "ethercat_core/devices/beckhoff/el3002/adapter.hpp"
+#include "ethercat_core/devices/beckhoff/elm3002/adapter.hpp"
 #include "ethercat_core/devices/motor_drives/drive_bases/ds402/data_types.hpp"
 #include "pdo_log.hpp"
 #include "testbench_utils/function_generator.hpp"
@@ -80,8 +80,8 @@ struct CommandState {
     float    dut_max_current_a    = 0.0f;
     // Torque sensor ADC scale (Nm); use current value as default so omitted
     // command messages leave the scale unchanged.
-    float    ch1_torque_scale     = 200.0f;  // matches El3002Adapter ch1 default
-    float    ch2_torque_scale     = 20.0f;   // matches El3002Adapter ch2 default
+    float    ch1_torque_scale     = 200.0f;  // matches Elm3002Adapter ch1 default
+    float    ch2_torque_scale     = 20.0f;   // matches Elm3002Adapter ch2 default
     // One-shot zero flags — cleared by the bridge after applying.
     bool     zero_torque_ch1      = false;
     bool     zero_torque_ch2      = false;
@@ -141,7 +141,7 @@ public:
         const std::string& torque_slave,
         const std::string& io_slave,
         bool               dut_present,
-        ethercat_core::beckhoff::el3002::El3002Adapter* el3002,
+        ethercat_core::beckhoff::elm3002::Elm3002Adapter* elm3002,
         int  drive_soem_idx,
         int  dut_soem_idx,
         int  main_out_enc_bits,
@@ -188,7 +188,7 @@ public:
     ) const;
 
     // Accessors used by bridge main() for torque operations and SDO routing.
-    ethercat_core::beckhoff::el3002::El3002Adapter* el3002()      const { return el3002_; }
+    ethercat_core::beckhoff::elm3002::Elm3002Adapter* elm3002()      const { return elm3002_; }
     int  driveIdx()       const { return drive_soem_idx_; }
     int  dutIdx()         const { return dut_soem_idx_; }
     bool dutPresent()     const { return dut_present_; }
@@ -201,7 +201,7 @@ private:
 
     std::string drive_slave_, dut_slave_, encoder_slave_, torque_slave_, io_slave_;
     bool        dut_present_;
-    ethercat_core::beckhoff::el3002::El3002Adapter* el3002_;
+    ethercat_core::beckhoff::elm3002::Elm3002Adapter* elm3002_;
     int         drive_soem_idx_, dut_soem_idx_;
     int         main_out_enc_bits_, dut_out_enc_bits_;
 
