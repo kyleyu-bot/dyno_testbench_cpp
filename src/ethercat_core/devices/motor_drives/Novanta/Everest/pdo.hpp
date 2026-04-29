@@ -2,9 +2,9 @@
 
 // Novanta Everest PDO layout
 // ──────────────────────────────────────────────────────────────────────────
-// RX PDO (master → drive), 51 bytes, Python format "<Hbiiffffffffff":
+// RX PDO (master → drive), 55 bytes, Python format "<Hbiifffffffffff":
 //   0x1600: 0x6040(U16), 0x6060(S8),  0x607A(S32), 0x60FF(S32),
-//           0x2022(F32), 0x2523(F32)
+//           0x2022(F32), 0x201A(F32), 0x2523(F32)
 //   0x1601: 0x2527(F32), 0x2528(F32), 0x250A(F32), 0x250B(F32),
 //           0x250C(F32), 0x2511(F32), 0x2512(F32), 0x2513(F32)
 //
@@ -22,7 +22,7 @@
 
 namespace ethercat_core::novanta::everest {
 
-static constexpr int RX_PDO_SIZE = 51;
+static constexpr int RX_PDO_SIZE = 55;
 static constexpr int TX_PDO_SIZE = 55;
 
 // Legacy TX PDO size supported as a fallback (Python format "<HbHhiiB", 16 bytes).
@@ -42,6 +42,7 @@ struct RxPdo {
     int32_t  target_position;        // 0x607A  (raw engineering units)
     int32_t  target_velocity;        // 0x60FF
     float    torque_command_2022;    // 0x2022
+    float    iq_setpoint;            // 0x201A
     float    torque_kp;              // 0x2523
     float    torque_loop_max_output; // 0x2527
     float    torque_loop_min_output; // 0x2528

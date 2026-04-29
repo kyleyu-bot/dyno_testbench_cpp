@@ -242,6 +242,7 @@ DS402_DEFAULT_MODE = 9   # Cyclic Sync Velocity
 
 # Allowed torque sensor scale values — must match El3002Adapter::ALLOWED_TORQUE_SCALES
 TORQUE_SCALE_OPTIONS = [20, 200, 500]   # Nm
+CURRENT_COMMAND_FALLBACK_LIMIT_A = 20.0
 
 MAIN_ZERO_FIELDS = ["main_velocity", "main_position", "main_torque", "main_current"]
 DUT_ZERO_FIELDS  = ["dut_velocity",  "dut_position",  "dut_torque",  "dut_current"]
@@ -423,6 +424,7 @@ class DynoCommander(Node):
         # Drive limits — updated from status topics, used to auto-set slider ranges.
         _empty_limits = {
             "max_velocity_abs": 0.0, "min_position": 0.0, "max_position": 0.0,
+            "max_current_a": 0.0,
             "torque_kp": 0.0, "torque_max": 0.0, "torque_min": 0.0,
             "vel_kp": 0.0, "vel_ki": 0.0, "vel_kd": 0.0,
             "pos_kp": 0.0, "pos_ki": 0.0, "pos_kd": 0.0,
@@ -512,6 +514,7 @@ class DynoCommander(Node):
                                       data.get("min_position", 0))),
             "max_position":     float(data.get("max_position_rad",
                                       data.get("max_position", 0))),
+            "max_current_a":     float(data.get("max_current_a", 0.0)),
             "torque_kp":  float(data.get("torque_kp",  0.0)),
             "torque_max": float(data.get("torque_max", 0.0)),
             "torque_min": float(data.get("torque_min", 0.0)),
@@ -596,7 +599,7 @@ class DynoCommander(Node):
 
     def get_limits(self, field_key: str):
         """Return (min, max, default) for a command field, or None if unavailable.
-        Gain fields return floats; velocity/position return floats in natural units."""
+        Gain fields return floats; setpoints return floats in natural units."""
         if field_key.startswith("main_"):
             with self._limits_lock:
                 limits = dict(self._main_limits)
@@ -623,6 +626,12 @@ class DynoCommander(Node):
             if hi >= 1e9:
                 hi = _NO_LIMIT
             return (lo, hi, 0.0)
+        elif field_type == "current":
+            max_current = limits.get("max_current_a", 0.0)
+            if max_current > 0.0:
+                return (-max_current, max_current, 0.0)
+            return (-CURRENT_COMMAND_FALLBACK_LIMIT_A,
+                    CURRENT_COMMAND_FALLBACK_LIMIT_A, 0.0)
         elif field_type == "torque_min":
             current = limits.get(field_type, 0.0)
             return (-20.0, 0.0, current)   # negative clamp — must allow negative
@@ -691,6 +700,8 @@ class DynoCommander(Node):
     def _publish(self):
         with self._lock:
             payload = dict(self._numeric)
+            payload["main_iqcommand"]    = payload.get("main_current", 0.0)
+            payload["dut_iqcommand"]     = payload.get("dut_current", 0.0)
             payload["main_enable"]       = self._main_enable
             payload["dut_enable"]        = self._dut_enable
             payload["fault_reset"]       = self._fault_reset
@@ -1932,7 +1943,7 @@ class DynoWindow(QMainWindow):
             1: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 9),   # Velocity → CSV
             2: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 8),   # Position → CSP
             3: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 10),  # Torque   → CST
-            4: next(i for i, (_, v) in enumerate(DS402_MODES) if v == 10),  # Current  → CST
+            4: next(i for i, (_, v) in enumerate(DS402_MODES) if v == -2),  # Current  → current mode
         }
 
         def _fg_on_ctrl_type(idx):

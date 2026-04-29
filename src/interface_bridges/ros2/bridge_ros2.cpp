@@ -151,8 +151,12 @@ public:
                     g_cmd_state.dut_position  = j.value("dut_position",  0.0f);
                     g_cmd_state.main_torque   = j.value("main_torque",   0.0f);
                     g_cmd_state.dut_torque    = j.value("dut_torque",    0.0f);
-                    g_cmd_state.main_current  = j.value("main_current",  0.0f);
-                    g_cmd_state.dut_current   = j.value("dut_current",   0.0f);
+                    g_cmd_state.main_current  = j.value("main_iqcommand",
+                                                        j.value("main_iq_command",
+                                                                j.value("main_current", 0.0f)));
+                    g_cmd_state.dut_current   = j.value("dut_iqcommand",
+                                                        j.value("dut_iq_command",
+                                                                j.value("dut_current", 0.0f)));
                     g_cmd_state.main_enable   = j.value("main_enable",   false);
                     g_cmd_state.dut_enable    = j.value("dut_enable",    false);
                     g_cmd_state.fault_reset   = j.value("fault_reset",   false);
@@ -818,6 +822,7 @@ int main(int argc, char** argv) {
             cmd_main_gains.position_loop_kp       = cmd.main_pos_kp;
             cmd_main_gains.position_loop_ki       = cmd.main_pos_ki;
             cmd_main_gains.position_loop_kd       = cmd.main_pos_kd;
+            cmd_main_gains.max_current_a          = cmd.main_max_current_a;
 
             DriveGains cmd_dut_gains;
             cmd_dut_gains.torque_kp               = cmd.dut_torque_kp;
@@ -829,6 +834,7 @@ int main(int argc, char** argv) {
             cmd_dut_gains.position_loop_kp        = cmd.dut_pos_kp;
             cmd_dut_gains.position_loop_ki        = cmd.dut_pos_ki;
             cmd_dut_gains.position_loop_kd        = cmd.dut_pos_kd;
+            cmd_dut_gains.max_current_a           = cmd.dut_max_current_a;
 
             const std::string main_json = DualNovantaTestbench::makeDriveJson(
                 drive_slave, drive_soem_idx, cur_status, main_out_enc_bits, cmd_main_gains);

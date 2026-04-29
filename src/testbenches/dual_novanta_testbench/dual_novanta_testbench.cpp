@@ -72,6 +72,7 @@ DriveGains DualNovantaTestbench::extractGains_(
     g.position_loop_kp       = get("position_loop_kp");
     g.position_loop_ki       = get("position_loop_ki");
     g.position_loop_kd       = get("position_loop_kd");
+    g.max_current_a          = get("max_current");
     return g;
 }
 
@@ -95,6 +96,7 @@ void DualNovantaTestbench::extractAndSeedGains(
     cmd_state.main_pos_kp         = main_gains.position_loop_kp;
     cmd_state.main_pos_ki         = main_gains.position_loop_ki;
     cmd_state.main_pos_kd         = main_gains.position_loop_kd;
+    cmd_state.main_max_current_a  = main_gains.max_current_a;
     cmd_state.dut_torque_kp       = dut_gains.torque_kp;
     cmd_state.dut_torque_max_out  = dut_gains.torque_loop_max_output;
     cmd_state.dut_torque_min_out  = dut_gains.torque_loop_min_output;
@@ -104,6 +106,7 @@ void DualNovantaTestbench::extractAndSeedGains(
     cmd_state.dut_pos_kp          = dut_gains.position_loop_kp;
     cmd_state.dut_pos_ki          = dut_gains.position_loop_ki;
     cmd_state.dut_pos_kd          = dut_gains.position_loop_kd;
+    cmd_state.dut_max_current_a   = dut_gains.max_current_a;
 }
 
 // ── makeCallback ──────────────────────────────────────────────────────────────
@@ -129,7 +132,8 @@ EthercatLoop::CycleCallback DualNovantaTestbench::makeCallback(
         main_cmd.target_position__enc_cnt = cmd.main_position
                                             * static_cast<float>(1LL << main_out_enc_bits_) / TWO_PI;
         main_cmd.target_torque_nm        = cmd.main_torque;
-        main_cmd.torque_command_2022     = cmd.main_current;
+        main_cmd.torque_command_2022     = cmd.main_torque;
+        main_cmd.iq_setpoint_a           = cmd.main_current;
         main_cmd.enable_drive            = !in_reset && cmd.main_enable;
         main_cmd.clear_fault             = in_reset || cmd.fault_reset;
         main_cmd.torque_kp               = cmd.main_torque_kp;
@@ -148,7 +152,8 @@ EthercatLoop::CycleCallback DualNovantaTestbench::makeCallback(
         dut_cmd.target_position__enc_cnt = cmd.dut_position
                                            * static_cast<float>(1LL << dut_out_enc_bits_) / TWO_PI;
         dut_cmd.target_torque_nm        = cmd.dut_torque;
-        dut_cmd.torque_command_2022     = cmd.dut_current;
+        dut_cmd.torque_command_2022     = cmd.dut_torque;
+        dut_cmd.iq_setpoint_a           = cmd.dut_current;
         dut_cmd.enable_drive            = !in_reset && cmd.dut_enable;
         dut_cmd.clear_fault             = in_reset || cmd.fault_reset;
         dut_cmd.torque_kp               = cmd.dut_torque_kp;
@@ -218,7 +223,7 @@ EthercatLoop::CycleCallback DualNovantaTestbench::makeCallback(
             case ControlType::POSITION: return ModeOfOperation::CYCLIC_SYNC_POSITION;
             case ControlType::VELOCITY: return ModeOfOperation::CYCLIC_SYNC_VELOCITY;
             case ControlType::TORQUE:
-            case ControlType::CURRENT:  return ModeOfOperation::CYCLIC_SYNC_TORQUE;
+            case ControlType::CURRENT:  return ModeOfOperation::CURRENT;
             default:                    return base;
             }
         };
@@ -270,8 +275,8 @@ EthercatLoop::CycleCallback DualNovantaTestbench::makeCallback(
                 drive_cmd.mode_of_operation = ModeOfOperation::CYCLIC_SYNC_TORQUE;
                 break;
             case ControlType::CURRENT:
-                drive_cmd.torque_command_2022 = static_cast<float>(val);
-                drive_cmd.mode_of_operation = ModeOfOperation::CYCLIC_SYNC_TORQUE;
+                drive_cmd.iq_setpoint_a = static_cast<float>(val);
+                drive_cmd.mode_of_operation = ModeOfOperation::CURRENT;
                 break;
             default: break;
             }
@@ -342,18 +347,37 @@ EthercatLoop::CycleCallback DualNovantaTestbench::makeCallback(
         if (dut_present_ && dut_log_it != status.by_slave.end() && dut_log_it->second.has_value())
             fill_tx(std::any_cast<const DriveStatus&>(dut_log_it->second), false);
 
-        // RxPDO — cmd was already snapshotted above under cmd_mutex.
-        rec.main_rx_mode_of_operation = cmd.main_mode;
-        rec.main_rx_target_position   = static_cast<int32_t>(
-            cmd.main_position * static_cast<float>(1LL << main_out_enc_bits_) / TWO_PI);
-        rec.main_rx_target_velocity   = static_cast<int32_t>(cmd.main_speed * 1000.0f / TWO_PI);
-        rec.main_rx_torque_command    = cmd.main_current;
+        // RxPDO — log the final command structs (after FG overrides) so recorded values
+        // match what was actually transmitted to the drives.
+        rec.main_rx_mode_of_operation = static_cast<int8_t>(main_cmd.mode_of_operation);
+        rec.main_rx_target_position   = static_cast<int32_t>(main_cmd.target_position__enc_cnt);
+        rec.main_rx_target_velocity   = static_cast<int32_t>(main_cmd.target_velocity_mrevs);
+        rec.main_rx_torque_command    = main_cmd.target_torque_nm;
+        rec.main_rx_iq_command        = main_cmd.iq_setpoint_a;
+        rec.main_rx_torque_kp         = main_cmd.torque_kp;
+        rec.main_rx_torque_max_out    = main_cmd.torque_loop_max_output;
+        rec.main_rx_torque_min_out    = main_cmd.torque_loop_min_output;
+        rec.main_rx_vel_kp            = main_cmd.velocity_loop_kp;
+        rec.main_rx_vel_ki            = main_cmd.velocity_loop_ki;
+        rec.main_rx_vel_kd            = main_cmd.velocity_loop_kd;
+        rec.main_rx_pos_kp            = main_cmd.position_loop_kp;
+        rec.main_rx_pos_ki            = main_cmd.position_loop_ki;
+        rec.main_rx_pos_kd            = main_cmd.position_loop_kd;
         rec.main_rx_enable            = cmd.main_enable;
-        rec.dut_rx_mode_of_operation  = cmd.dut_mode;
-        rec.dut_rx_target_position    = static_cast<int32_t>(
-            cmd.dut_position * static_cast<float>(1LL << dut_out_enc_bits_) / TWO_PI);
-        rec.dut_rx_target_velocity    = static_cast<int32_t>(cmd.dut_speed * 1000.0f / TWO_PI);
-        rec.dut_rx_torque_command     = cmd.dut_current;
+        rec.dut_rx_mode_of_operation  = static_cast<int8_t>(dut_cmd.mode_of_operation);
+        rec.dut_rx_target_position    = static_cast<int32_t>(dut_cmd.target_position__enc_cnt);
+        rec.dut_rx_target_velocity    = static_cast<int32_t>(dut_cmd.target_velocity_mrevs);
+        rec.dut_rx_torque_command     = dut_cmd.target_torque_nm;
+        rec.dut_rx_iq_command         = dut_cmd.iq_setpoint_a;
+        rec.dut_rx_torque_kp          = dut_cmd.torque_kp;
+        rec.dut_rx_torque_max_out     = dut_cmd.torque_loop_max_output;
+        rec.dut_rx_torque_min_out     = dut_cmd.torque_loop_min_output;
+        rec.dut_rx_vel_kp             = dut_cmd.velocity_loop_kp;
+        rec.dut_rx_vel_ki             = dut_cmd.velocity_loop_ki;
+        rec.dut_rx_vel_kd             = dut_cmd.velocity_loop_kd;
+        rec.dut_rx_pos_kp             = dut_cmd.position_loop_kp;
+        rec.dut_rx_pos_ki             = dut_cmd.position_loop_ki;
+        rec.dut_rx_pos_kd             = dut_cmd.position_loop_kd;
         rec.dut_rx_enable             = cmd.dut_enable;
 
         auto enc_it = status.by_slave.find(encoder_slave_);
@@ -393,7 +417,8 @@ std::string DualNovantaTestbench::serializeToCsvRow(const dyno::PdoLogRecord& r)
     // main rx
     o << static_cast<int>(r.main_rx_mode_of_operation) << ','
       << r.main_rx_target_position   << ',' << r.main_rx_target_velocity    << ','
-      << r.main_rx_torque_command    << ',' << r.main_rx_torque_kp          << ','
+      << r.main_rx_torque_command    << ',' << r.main_rx_iq_command         << ','
+      << r.main_rx_torque_kp         << ','
       << r.main_rx_torque_max_out    << ',' << r.main_rx_torque_min_out     << ','
       << r.main_rx_vel_kp            << ',' << r.main_rx_vel_ki             << ','
       << r.main_rx_vel_kd            << ',' << r.main_rx_pos_kp             << ','
@@ -411,7 +436,8 @@ std::string DualNovantaTestbench::serializeToCsvRow(const dyno::PdoLogRecord& r)
     // dut rx
     o << static_cast<int>(r.dut_rx_mode_of_operation) << ','
       << r.dut_rx_target_position    << ',' << r.dut_rx_target_velocity     << ','
-      << r.dut_rx_torque_command     << ',' << r.dut_rx_torque_kp           << ','
+      << r.dut_rx_torque_command     << ',' << r.dut_rx_iq_command          << ','
+      << r.dut_rx_torque_kp          << ','
       << r.dut_rx_torque_max_out     << ',' << r.dut_rx_torque_min_out      << ','
       << r.dut_rx_vel_kp             << ',' << r.dut_rx_vel_ki              << ','
       << r.dut_rx_vel_kd             << ',' << r.dut_rx_pos_kp              << ','
@@ -473,6 +499,7 @@ std::string DualNovantaTestbench::makeDriveJson(
         j["max_velocity_abs"]   = ds.max_velocity_abs;
         j["min_position"]       = ds.min_position;
         j["max_position"]       = ds.max_position;
+        j["max_current_a"]      = static_cast<double>(gains.max_current_a);
         // Control gains (current values being sent to drive)
         j["torque_kp"]  = static_cast<double>(gains.torque_kp);
         j["torque_max"] = static_cast<double>(gains.torque_loop_max_output);

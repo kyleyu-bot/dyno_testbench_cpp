@@ -67,6 +67,7 @@ struct CommandState {
     float    main_pos_kp          = 0.0f;
     float    main_pos_ki          = 0.0f;
     float    main_pos_kd          = 0.0f;
+    float    main_max_current_a   = 0.0f;
     float    dut_torque_kp        = 0.0f;
     float    dut_torque_max_out   = 0.0f;
     float    dut_torque_min_out   = 0.0f;
@@ -76,6 +77,7 @@ struct CommandState {
     float    dut_pos_kp           = 0.0f;
     float    dut_pos_ki           = 0.0f;
     float    dut_pos_kd           = 0.0f;
+    float    dut_max_current_a    = 0.0f;
     // Torque sensor ADC scale (Nm); use current value as default so omitted
     // command messages leave the scale unchanged.
     float    ch1_torque_scale     = 200.0f;  // matches El3002Adapter ch1 default
@@ -121,6 +123,7 @@ struct DriveGains {
     float position_loop_kp       = 0.0f;
     float position_loop_ki       = 0.0f;
     float position_loop_kd       = 0.0f;
+    float max_current_a          = 0.0f;
 };
 
 // ── Dual-Novanta testbench helper ─────────────────────────────────────────────
