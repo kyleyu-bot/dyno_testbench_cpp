@@ -2134,13 +2134,17 @@ class DynoWindow(QMainWindow):
         pp_lay.setContentsMargins(4, 2, 4, 2)
         pp_lay.setSpacing(4)
 
-        def _launch(cmd, clean_pythonpath=False):
-            env = None
-            if clean_pythonpath:
-                env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        def _launch(cmd):
             subprocess.Popen(cmd, start_new_session=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             env=env)
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def _launch_as_user(cmd):
+            sudo_user = os.environ.get("SUDO_USER")
+            if sudo_user:
+                cmd = ["sudo", "-u", sudo_user, "-H",
+                       "--preserve-env=DISPLAY,XAUTHORITY"] + cmd
+            subprocess.Popen(cmd, start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 
@@ -2153,10 +2157,9 @@ class DynoWindow(QMainWindow):
             ["python3", os.path.join(repo, "src/tools/dyno_log_viewer.py")]))
 
         btn_bode = QPushButton("Bode Plot")
-        btn_bode.clicked.connect(lambda: _launch(
+        btn_bode.clicked.connect(lambda: _launch_as_user(
             ["python3", os.path.join(repo,
-             "src/tools/post_processing/bode_plot/dyno_bode_gui.py")],
-            clean_pythonpath=True))
+             "src/tools/post_processing/bode_plot/dyno_bode_gui.py")]))
 
         for btn in (btn_plot, btn_log, btn_bode):
             pp_lay.addWidget(btn)
