@@ -24,7 +24,7 @@ if [ -n "$USER_SITE" ]; then
     export PYTHONPATH="$USER_SITE${PYTHONPATH:+:$PYTHONPATH}"
 fi
 
-exec sudo \
+sudo -A \
     PYTHONPATH="$PYTHONPATH" \
     FASTRTPS_DEFAULT_PROFILES_FILE="$PROFILES" \
     ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}" \
