@@ -51,6 +51,7 @@ fi
 export SUDO_ASKPASS="$GUI_ASKPASS"
 sudo -A pkill -f bridge_ros2 2>/dev/null || true
 sudo -A pkill -f dyno_gui.py  2>/dev/null || true
+sudo -A chown -R "$USER" "$REPO_ROOT/test_data_log" 2>/dev/null || true
 sleep 0.5
 
 exec bash "$REPO_ROOT/src/interface_bridges/ros2/run_gui.sh"

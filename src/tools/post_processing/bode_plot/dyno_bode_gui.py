@@ -31,6 +31,7 @@ class DynoBodeApp(tk.Tk):
         self._fig = None
         self._canvas = None
         self._toolbar = None
+        self._result = None
         self._build_controls()
         self._plot_frame = ttk.LabelFrame(self, text="Preview", padding=4)
         self._plot_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -95,6 +96,8 @@ class DynoBodeApp(tk.Tk):
         ttk.Entry(ctrl, textvariable=self.lowpass_var, width=10).grid(row=5, column=1, sticky="w", padx=6)
         ttk.Checkbutton(ctrl, text="Invert response", variable=self.invert_var).grid(row=5, column=2, sticky="w")
         ttk.Button(ctrl, text="Generate", command=self._generate).grid(row=5, column=3, sticky="e")
+        self._save_btn = ttk.Button(ctrl, text="Save", command=self._save, state="disabled")
+        self._save_btn.grid(row=5, column=4, sticky="e", padx=(6, 0))
 
         self.status_var = tk.StringVar(value="Ready.")
         ttk.Label(ctrl, textvariable=self.status_var, foreground="grey").grid(row=6, column=0, columnspan=4, sticky="w")
@@ -126,7 +129,7 @@ class DynoBodeApp(tk.Tk):
         return float(text) if text else None
 
     def _analysis_status(self, result) -> str:
-        parts = [f"Saved {Path(result.csv_path).with_name(f'bode_{self.preset_var.get()}.png')}"]
+        parts = []
         if result.f_3db is not None:
             parts.append(f"-3 dB {result.f_3db:.3g} Hz")
         else:
@@ -166,15 +169,34 @@ class DynoBodeApp(tk.Tk):
         if self._toolbar is not None:
             self._toolbar.destroy()
         self._fig = fig
+        self._result = result
         self._canvas = FigureCanvasTkAgg(fig, master=self._plot_frame)
         self._canvas.draw()
         self._canvas.get_tk_widget().pack(fill="both", expand=True)
         self._toolbar = NavigationToolbar2Tk(self._canvas, self._plot_frame)
         self._toolbar.update()
-
-        out_path = Path(result.csv_path).with_name(f"bode_{self.preset_var.get()}.png")
-        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        self._save_btn.configure(state="normal")
         self.status_var.set(self._analysis_status(result))
+
+    def _save(self):
+        if self._fig is None:
+            return
+        default_dir = str(Path(self._result.csv_path).resolve().parent)
+        default_name = f"bode_{self.preset_var.get()}.png"
+        path = filedialog.asksaveasfilename(
+            title="Save Bode Plot",
+            initialdir=default_dir,
+            initialfile=default_name,
+            defaultextension=".png",
+            filetypes=(("PNG", "*.png"), ("All files", "*")),
+        )
+        if not path:
+            return
+        try:
+            self._fig.savefig(path, dpi=150, bbox_inches="tight")
+            self.status_var.set(f"Saved {path}")
+        except Exception as exc:
+            messagebox.showerror("Save failed", str(exc))
 
 
 if __name__ == "__main__":
