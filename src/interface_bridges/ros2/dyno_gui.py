@@ -2128,13 +2128,55 @@ class DynoWindow(QMainWindow):
                 _b.setEnabled(False)
                 _b.setToolTip("Bridge not managed by GUI")
 
+        # ── Post-processing buttons (right of spin boxes) ─────────────────────
+        pp_btns = QWidget()
+        pp_lay  = QVBoxLayout(pp_btns)
+        pp_lay.setContentsMargins(4, 2, 4, 2)
+        pp_lay.setSpacing(4)
+
+        def _launch(cmd, clean_pythonpath=False):
+            env = None
+            if clean_pythonpath:
+                env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+            subprocess.Popen(cmd, start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             env=env)
+
+        repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+
+        btn_plot = QPushButton("Live Plot")
+        btn_plot.clicked.connect(lambda: _launch(
+            ["bash", os.path.join(repo, "src/interface_bridges/ros2/run_plot.sh")]))
+
+        btn_log = QPushButton("Log Viewer")
+        btn_log.clicked.connect(lambda: _launch(
+            ["python3", os.path.join(repo, "src/tools/dyno_log_viewer.py")]))
+
+        btn_bode = QPushButton("Bode Plot")
+        btn_bode.clicked.connect(lambda: _launch(
+            ["python3", os.path.join(repo,
+             "src/tools/post_processing/bode_plot/dyno_bode_gui.py")],
+            clean_pythonpath=True))
+
+        for btn in (btn_plot, btn_log, btn_bode):
+            pp_lay.addWidget(btn)
+        pp_lay.addStretch(1)
+
+        # Wrap spin_area and buttons side by side.
+        spin_and_pp     = QWidget()
+        spin_and_pp_lay = QHBoxLayout(spin_and_pp)
+        spin_and_pp_lay.setContentsMargins(0, 0, 0, 0)
+        spin_and_pp_lay.setSpacing(0)
+        spin_and_pp_lay.addWidget(spin_area, 1)
+        spin_and_pp_lay.addWidget(pp_btns, 0)
+
         # ── Central widget ─────────────────────────────────────────────────────
         central = QWidget()
         vlay    = QVBoxLayout(central)
         vlay.setContentsMargins(0, 0, 0, 0)
         vlay.setSpacing(0)
         vlay.addWidget(splitter)
-        vlay.addWidget(spin_area)
+        vlay.addWidget(spin_and_pp)
         vlay.addWidget(status_row)
         self.setCentralWidget(central)
 
