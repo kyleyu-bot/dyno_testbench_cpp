@@ -15,7 +15,7 @@ Type=Application
 Name=Dyno Testbench
 Exec=bash $LAUNCHER
 Icon=applications-science
-Terminal=true
+Terminal=false
 Categories=Science;Engineering;
 EOF
 
