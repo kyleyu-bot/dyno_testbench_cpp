@@ -114,8 +114,11 @@ def run(params: dict, commander, stop_event):
         time.sleep(0.05)
     sdo(0x2385, 0x00, 2, 1)                 # FBK_GEN_REARM = 1
 
-    # Hold until aborted — repeatedly send iq_command to main_current PDO
-    while not stop_event.is_set():
+    # Hold for calculated duration (cycles / freq) or until aborted.
+    # cycles == 0 means continuous — run until aborted.
+    run_time_s = (cycles / freq) if (cycles > 0 and freq > 0) else float("inf")
+    t_start = time.monotonic()
+    while not stop_event.is_set() and time.monotonic() - t_start < run_time_s:
         commander.set_command(
             numeric     = {"main_current": iq_command},
             main_enable = True,
@@ -125,14 +128,15 @@ def run(params: dict, commander, stop_event):
         )
         time.sleep(0.05)
 
-    # Teardown: zero current command
+    # Teardown: zero current and disable drive
     commander.set_command(
         numeric     = {"main_current": 0.0},
-        main_enable = True,
+        main_enable = False,
         dut_enable  = False,
-        main_mode   = control_mode,
+        main_mode   = 0,
         dut_mode    = 0,
     )
+    time.sleep(0.3)  # wait for Switch On Disabled before SDO write
 
     # Teardown: restore normal commutation sensor
     commander.request_sdo(drive, "write", 0x2151, 0x00, 2, 1)
