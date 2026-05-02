@@ -284,6 +284,13 @@ EthercatLoop::CycleCallback DualNovantaTestbench::makeCallback(
         apply_fg(main_cmd, fg_main_, main_captured_pos_, main_out_enc_bits_);
         apply_fg(dut_cmd,  fg_dut_,  dut_captured_pos_,  dut_out_enc_bits_);
 
+        last_main_fg_out_.store(fg_main_.isEnabled()
+            ? static_cast<float>(fg_main_.getValue()) : 0.f,
+            std::memory_order_relaxed);
+        last_dut_fg_out_.store(fg_dut_.isEnabled()
+            ? static_cast<float>(fg_dut_.getValue()) : 0.f,
+            std::memory_order_relaxed);
+
         beckhoff::el2004::Command io_cmd;
         io_cmd.output_1 = cmd.hold_output1;
 

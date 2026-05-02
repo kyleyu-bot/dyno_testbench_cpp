@@ -137,6 +137,7 @@ public:
         pub_ch2_t_ = create_publisher<std_msgs::msg::Float64>("/dyno/torque/ch2",         10);
         pub_sdo_   = create_publisher<std_msgs::msg::String>("/dyno/sdo_response",        10);
         pub_bus_   = create_publisher<std_msgs::msg::String>("/dyno/bus_status",          10);
+        pub_rt_cmd_ = create_publisher<std_msgs::msg::String>("/dyno/rt_command",         10);
 
         // Command subscriber
         sub_cmd_ = create_subscription<std_msgs::msg::String>(
@@ -329,6 +330,44 @@ public:
         }
     }
 
+    // Publish the effective per-cycle command, substituting the FG output when
+    // the function generator is enabled.
+    void publishRtCommand(const CommandState& cmd,
+                          float main_fg_out, float dut_fg_out)
+    {
+        using CT = testbench_utils::ControlType;
+
+        auto fill = [](json& j, const std::string& pfx,
+                       bool fg_en, int fg_ct, float fg_out,
+                       float raw_vel, float raw_pos,
+                       float raw_torque, float raw_current) {
+            if (fg_en) {
+                switch (static_cast<CT>(fg_ct)) {
+                case CT::VELOCITY: j[pfx + "velocity"] = fg_out;  break;
+                case CT::POSITION: j[pfx + "position"] = fg_out;  break;
+                case CT::TORQUE:   j[pfx + "torque"]   = fg_out;  break;
+                case CT::CURRENT:  j[pfx + "current"]  = fg_out;  break;
+                default: break;
+                }
+            } else {
+                j[pfx + "velocity"] = raw_vel;
+                j[pfx + "position"] = raw_pos;
+                j[pfx + "torque"]   = raw_torque;
+                j[pfx + "current"]  = raw_current;
+            }
+        };
+
+        json j;
+        fill(j, "main_", cmd.main_fg_enable, cmd.main_fg_control_type, main_fg_out,
+             cmd.main_speed, cmd.main_position, cmd.main_torque, cmd.main_current);
+        fill(j, "dut_",  cmd.dut_fg_enable,  cmd.dut_fg_control_type,  dut_fg_out,
+             cmd.dut_speed,  cmd.dut_position,  cmd.dut_torque,  cmd.dut_current);
+
+        std_msgs::msg::String msg;
+        msg.data = j.dump();
+        pub_rt_cmd_->publish(msg);
+    }
+
 private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_main_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_dut_;
@@ -338,6 +377,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr  pub_ch2_t_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_sdo_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_bus_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr   pub_rt_cmd_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_cmd_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_sdo_;
     int drive_soem_idx_ = 1;
@@ -873,6 +913,7 @@ int main(int argc, char** argv) {
                 main_json, dut_json,
                 enc, ch1_t, ch2_t
             );
+            node->publishRtCommand(cmd, testbench.lastMainFgOut(), testbench.lastDutFgOut());
             node->publishBusStatus();
 
             if (debug_print)

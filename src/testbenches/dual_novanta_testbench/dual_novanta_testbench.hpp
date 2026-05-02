@@ -8,6 +8,7 @@
 #include "pdo_log.hpp"
 #include "testbench_utils/function_generator.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <mutex>
 #include <string>
@@ -195,6 +196,11 @@ public:
     int  mainOutEncBits() const { return main_out_enc_bits_; }
     int  dutOutEncBits()  const { return dut_out_enc_bits_; }
 
+    // Last per-cycle FG output in natural units (A / Nm / rad/s / rad).
+    // Written by the RT callback; safe to read from the pub thread.
+    float lastMainFgOut() const { return last_main_fg_out_.load(std::memory_order_relaxed); }
+    float lastDutFgOut()  const { return last_dut_fg_out_.load(std::memory_order_relaxed); }
+
 private:
     DriveGains extractGains_(const ethercat_core::MasterRuntime& rt,
                               const std::string& slave_name) const;
@@ -211,4 +217,7 @@ private:
     int32_t  dut_captured_pos_  = 0;
     int8_t   prev_main_mode_    = 0;
     int8_t   prev_dut_mode_     = 0;
+
+    std::atomic<float> last_main_fg_out_{0.f};
+    std::atomic<float> last_dut_fg_out_{0.f};
 };
