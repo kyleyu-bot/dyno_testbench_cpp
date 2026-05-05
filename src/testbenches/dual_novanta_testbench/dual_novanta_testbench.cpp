@@ -86,6 +86,18 @@ void DualNovantaTestbench::extractAndSeedGains(
     const DriveGains main_gains = extractGains_(rt, drive_slave_);
     const DriveGains dut_gains  = extractGains_(rt, dut_slave_);
 
+    // sensor_ratio = (rev at position sensor) / (rev at velocity sensor)
+    // gear_ratio   = 1 / sensor_ratio
+    auto read_gear_ratio = [&](const std::string& slave) -> float {
+        auto it = rt.startup_params.find(slave);
+        if (it == rt.startup_params.end()) return 1.f;
+        auto pit = it->second.find("sensor_ratio");
+        if (pit == it->second.end() || std::abs(pit->second) < 1e-6f) return 1.f;
+        return 1.f / pit->second;
+    };
+    main_gear_ratio_ = read_gear_ratio(drive_slave_);
+    dut_gear_ratio_  = read_gear_ratio(dut_slave_);
+
     std::lock_guard<std::mutex> lk(cmd_mutex);
     cmd_state.main_torque_kp      = main_gains.torque_kp;
     cmd_state.main_torque_max_out = main_gains.torque_loop_max_output;
@@ -399,6 +411,9 @@ EthercatLoop::CycleCallback DualNovantaTestbench::makeCallback(
             rec.torque_ch2_nm = elm3002_->scaledTorqueCh2(d);
         }
 
+        rec.main_gear_ratio = main_gear_ratio_;
+        rec.dut_gear_ratio  = dut_gear_ratio_;
+
         log_buf.push(rec);
         return sys_cmd;
     };
@@ -451,7 +466,8 @@ std::string DualNovantaTestbench::serializeToCsvRow(const dyno::PdoLogRecord& r)
       << r.dut_rx_pos_ki             << ',' << r.dut_rx_pos_kd              << ','
       << static_cast<int>(r.dut_rx_enable) << ',';
     // sensors
-    o << r.encoder_count << ',' << r.torque_ch1_nm << ',' << r.torque_ch2_nm;
+    o << r.encoder_count  << ',' << r.torque_ch1_nm   << ',' << r.torque_ch2_nm << ','
+      << r.main_gear_ratio << ',' << r.dut_gear_ratio;
     return o.str();
 }
 

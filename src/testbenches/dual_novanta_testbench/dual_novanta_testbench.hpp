@@ -201,6 +201,11 @@ public:
     float lastMainFgOut() const { return last_main_fg_out_.load(std::memory_order_relaxed); }
     float lastDutFgOut()  const { return last_dut_fg_out_.load(std::memory_order_relaxed); }
 
+    void setGearRatios(float main_gr, float dut_gr) {
+        main_gear_ratio_ = main_gr;
+        dut_gear_ratio_  = dut_gr;
+    }
+
 private:
     DriveGains extractGains_(const ethercat_core::MasterRuntime& rt,
                               const std::string& slave_name) const;
@@ -220,4 +225,7 @@ private:
 
     std::atomic<float> last_main_fg_out_{0.f};
     std::atomic<float> last_dut_fg_out_{0.f};
+
+    float main_gear_ratio_ = 1.f;
+    float dut_gear_ratio_  = 1.f;
 };

@@ -86,6 +86,8 @@ using json            = nlohmann::json;
 
 static std::atomic<bool> g_shutdown{false};
 static std::atomic<bool> g_rotate_log{false};
+static std::string       g_script_name;
+static std::mutex        g_script_name_mtx;
 static void onSignal(int) { g_shutdown.store(true); }
 
 // ── Shared command state (written by ROS2 subscriber, read by main loop) ──────
@@ -189,6 +191,10 @@ public:
                     g_cmd_state.zero_torque_ch1    |= j.value("zero_torque_ch1", false);
                     g_cmd_state.zero_torque_ch2    |= j.value("zero_torque_ch2", false);
                     g_cmd_state.save_log           |= j.value("save_log",        false);
+                    if (j.contains("script_name")) {
+                        std::lock_guard<std::mutex> snlk(g_script_name_mtx);
+                        g_script_name = j.value("script_name", "");
+                    }
                     // Function generator config
                     g_cmd_state.main_fg_enable       = j.value("main_fg_enable",       false);
                     g_cmd_state.main_fg_waveform     = j.value("main_fg_waveform",     g_cmd_state.main_fg_waveform);
@@ -386,15 +392,23 @@ private:
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-/// Create test_data_log/YYYY-MM-DD/HHMMSS/dyno_pdo.csv, making all parent dirs.
-static std::string make_run_csv_path(rclcpp::Logger logger)
+/// Create test_data_log/YYYY-MM-DD/HHMMSS[_script_name]/dyno_pdo.csv, making all parent dirs.
+static std::string make_run_csv_path(rclcpp::Logger logger,
+                                     const std::string& script_name = "")
 {
     std::time_t t    = std::time(nullptr);
     std::tm*    tm_  = std::localtime(&t);
     char date_buf[16], time_buf[8];
     std::strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", tm_);
     std::strftime(time_buf, sizeof(time_buf), "%H%M%S",   tm_);
-    std::string run_dir = std::string("test_data_log/") + date_buf + "/" + time_buf;
+    std::string suffix;
+    if (!script_name.empty()) {
+        suffix = "_";
+        for (char c : script_name)
+            suffix += (std::isalnum(static_cast<unsigned char>(c)) ? c : '_');
+        while (!suffix.empty() && suffix.back() == '_') suffix.pop_back();
+    }
+    std::string run_dir = std::string("test_data_log/") + date_buf + "/" + time_buf + suffix;
     std::error_code ec;
     std::filesystem::create_directories(run_dir, ec);
     if (ec) {
@@ -582,7 +596,9 @@ int main(int argc, char** argv) {
             if (g_rotate_log.exchange(false)) {
                 csv_file.flush();
                 csv_file.close();
-                log_path = make_run_csv_path(node->get_logger());
+                std::string sname;
+                { std::lock_guard<std::mutex> lk(g_script_name_mtx); sname = g_script_name; }
+                log_path = make_run_csv_path(node->get_logger(), sname);
                 csv_file.open(log_path);
                 csv_file << dyno::PDO_LOG_CSV_HEADER << '\n';
                 RCLCPP_INFO(node->get_logger(), "PDO log rotated: %s", log_path.c_str());

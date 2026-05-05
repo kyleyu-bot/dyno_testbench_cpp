@@ -418,6 +418,7 @@ class DynoCommander(Node):
         self._zero_torque_ch1   = False
         self._zero_torque_ch2   = False
         self._save_log          = False
+        self._script_name       = ""
         self._main_mode    = DS402_DEFAULT_MODE
         self._dut_mode     = DS402_DEFAULT_MODE
 
@@ -662,6 +663,10 @@ class DynoCommander(Node):
         with self._lock:
             self._save_log = True
 
+    def set_script_name(self, name: str) -> None:
+        with self._lock:
+            self._script_name = name
+
     def request_sdo(self, drive: str, op: str,
                     index: int, subindex: int, size: int, value: int = 0) -> None:
         payload = {
@@ -711,6 +716,7 @@ class DynoCommander(Node):
             payload["zero_torque_ch1"]   = self._zero_torque_ch1
             payload["zero_torque_ch2"]   = self._zero_torque_ch2
             payload["save_log"]          = self._save_log
+            payload["script_name"]       = self._script_name
             self._fault_reset          = False   # one-shot pulses
             self._zero_torque_ch1      = False
             self._zero_torque_ch2      = False
@@ -1377,6 +1383,10 @@ class ScriptingPanel(QGroupBox):
         if self._on_script_active:
             self._on_script_active(True)
 
+        script_stem = os.path.splitext(self._script_combo.currentText())[0]
+        self._commander.set_script_name(script_stem)
+        self._commander.pulse_save_log()
+
         params = self._collect_params()
         self._log.clear()
         self._log_line(f"[run] {self._script_combo.currentText()}")
@@ -1441,6 +1451,8 @@ class ScriptingPanel(QGroupBox):
 
     def _on_script_done(self, success: bool, msg: str):
         """Log-only — UI state is managed by _poll_thread_done."""
+        self._commander.set_script_name("")
+        self._commander.pulse_save_log()
         status = "OK" if success else "ERROR"
         self._log_line(f"[{status}] {msg.strip()}")
 
@@ -2095,7 +2107,7 @@ class DynoWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setFixedHeight(max(200, _content_h - 15))
+        splitter.setFixedHeight(max(200, _content_h - 15 + 32))
 
         # ── Bottom status / bridge row ────────────────────────────────────────
         status_row = QWidget()
@@ -2128,12 +2140,7 @@ class DynoWindow(QMainWindow):
                 _b.setEnabled(False)
                 _b.setToolTip("Bridge not managed by GUI")
 
-        # ── Post-processing buttons (right of spin boxes) ─────────────────────
-        pp_btns = QWidget()
-        pp_lay  = QVBoxLayout(pp_btns)
-        pp_lay.setContentsMargins(4, 2, 4, 2)
-        pp_lay.setSpacing(4)
-
+        # ── Post-processing buttons (left-aligned with _script_panel) ─────────
         def _launch(cmd):
             subprocess.Popen(cmd, start_new_session=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -2161,17 +2168,25 @@ class DynoWindow(QMainWindow):
             ["python3", os.path.join(repo,
              "src/tools/post_processing/bode_plot/dyno_bode_gui.py")]))
 
-        for btn in (btn_plot, btn_log, btn_bode):
-            pp_lay.addWidget(btn)
-        pp_lay.addStretch(1)
+        btn_kt = QPushButton("Kt Plot")
+        btn_kt.clicked.connect(lambda: _launch_as_user(
+            ["python3", os.path.join(repo,
+             "src/tools/post_processing/kt_plot/dyno_kt_gui.py")]))
 
-        # Wrap spin_area and buttons side by side.
-        spin_and_pp     = QWidget()
-        spin_and_pp_lay = QHBoxLayout(spin_and_pp)
-        spin_and_pp_lay.setContentsMargins(0, 0, 0, 0)
-        spin_and_pp_lay.setSpacing(0)
-        spin_and_pp_lay.addWidget(spin_area, 1)
-        spin_and_pp_lay.addWidget(pp_btns, 0)
+        # Horizontal row inside the right panel so buttons sit directly below
+        # _script_panel with their left edge aligned to its left edge.
+        # The left spacer matches btn_w (200 px) + right_lay spacing (6 px).
+        pp_row     = QWidget()
+        pp_row_lay = QHBoxLayout(pp_row)
+        pp_row_lay.setContentsMargins(0, 2, 0, 2)
+        pp_row_lay.setSpacing(6)
+        pp_spacer = QWidget()
+        pp_spacer.setFixedWidth(206)
+        pp_row_lay.addWidget(pp_spacer)
+        for btn in (btn_plot, btn_log, btn_bode, btn_kt):
+            pp_row_lay.addWidget(btn)
+        pp_row_lay.addStretch(1)
+        right_outer.insertWidget(1, pp_row)  # between right_inner and stretch
 
         # ── Central widget ─────────────────────────────────────────────────────
         central = QWidget()
@@ -2179,7 +2194,7 @@ class DynoWindow(QMainWindow):
         vlay.setContentsMargins(0, 0, 0, 0)
         vlay.setSpacing(0)
         vlay.addWidget(splitter)
-        vlay.addWidget(spin_and_pp)
+        vlay.addWidget(spin_area)
         vlay.addWidget(status_row)
         self.setCentralWidget(central)
 
