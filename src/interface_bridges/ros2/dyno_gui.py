@@ -1448,11 +1448,13 @@ class ScriptingPanel(QGroupBox):
                 self._on_script_active(False)
             self._run_btn.setEnabled(True)
             self._abort_btn.setEnabled(False)
+            # End the named log window — runs here (not in _on_script_done) because
+            # QTimer.singleShot from a background thread is not reliable.
+            self._commander.set_script_name("")
+            self._commander.pulse_save_log()
 
     def _on_script_done(self, success: bool, msg: str):
-        """Log-only — UI state is managed by _poll_thread_done."""
-        self._commander.set_script_name("")
-        self._commander.pulse_save_log()
+        """Log result message — UI state and log rotation handled by _poll_thread_done."""
         status = "OK" if success else "ERROR"
         self._log_line(f"[{status}] {msg.strip()}")
 

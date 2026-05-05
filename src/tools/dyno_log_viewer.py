@@ -106,6 +106,8 @@ class PlotCell(pg.PlotWidget):
         self.showGrid(x=True, y=True, alpha=0.3)
         self.setLabel("bottom", "time (s)")
         self.setMinimumSize(220, 160)
+        self.setClipToView(True)
+        self.setDownsampling(auto=True, mode="peak")
 
     def set_dataframe(self, df: "pd.DataFrame") -> None:
         self._df = df
@@ -516,8 +518,16 @@ class DynoLogViewer(QMainWindow):
             self._load_file(path)
 
     def _load_file(self, path: str):
+        mb = os.path.getsize(path) / 1_048_576
+        self._status.setText(f"Loading {os.path.basename(path)}  ({mb:.1f} MB)…")
+        QApplication.processEvents()
         try:
-            df = pd.read_csv(path)
+            # float32 halves memory vs the default float64; stamp_ns stays int64.
+            df = pd.read_csv(path, dtype=np.float32, low_memory=False)
+            if X_FIELD in df.columns:
+                df[X_FIELD] = pd.read_csv(
+                    path, usecols=[X_FIELD], dtype={X_FIELD: np.int64}
+                )[X_FIELD]
         except Exception as e:
             self._status.setText(f"Error: {e}")
             return
@@ -528,7 +538,8 @@ class DynoLogViewer(QMainWindow):
         rows = len(df)
         dur  = (df[X_FIELD].iloc[-1] - df[X_FIELD].iloc[0]) * 1e-9 if rows > 1 else 0
         self._status.setText(
-            f"{os.path.basename(path)}  |  {rows:,} rows  |  {dur:.1f} s  |  {len(df.columns)} signals"
+            f"{os.path.basename(path)}  |  {rows:,} rows  |  {dur:.1f} s  |  "
+            f"{len(df.columns)} signals  |  {mb:.1f} MB"
         )
 
     # ── Directory selection ────────────────────────────────────────────────────

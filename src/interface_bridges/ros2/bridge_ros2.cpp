@@ -57,6 +57,7 @@ extern "C" {
 #include <algorithm>
 #include <fstream>
 #include <cmath>
+#include <pwd.h>
 #include <limits>
 #include <any>
 #include <atomic>
@@ -392,6 +393,16 @@ private:
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
+/// Chown path to SUDO_USER if the process was launched via sudo.
+static void chown_to_sudo_user(const std::string& path)
+{
+    const char* sudo_user = std::getenv("SUDO_USER");
+    if (!sudo_user || !*sudo_user) return;
+    const struct passwd* pw = getpwnam(sudo_user);
+    if (!pw) return;
+    chown(path.c_str(), pw->pw_uid, pw->pw_gid);
+}
+
 /// Create test_data_log/YYYY-MM-DD/HHMMSS[_script_name]/dyno_pdo.csv, making all parent dirs.
 static std::string make_run_csv_path(rclcpp::Logger logger,
                                      const std::string& script_name = "")
@@ -415,6 +426,8 @@ static std::string make_run_csv_path(rclcpp::Logger logger,
         RCLCPP_WARN(logger, "Could not create log dir '%s': %s",
                     run_dir.c_str(), ec.message().c_str());
     }
+    chown_to_sudo_user(std::string("test_data_log/") + date_buf);
+    chown_to_sudo_user(run_dir);
     return run_dir + "/dyno_pdo.csv";
 }
 
@@ -545,6 +558,7 @@ int main(int argc, char** argv) {
     std::string   log_path = make_run_csv_path(node->get_logger());
     std::ofstream csv_file(log_path);
     csv_file << dyno::PDO_LOG_CSV_HEADER << '\n';
+    chown_to_sudo_user(log_path);
     RCLCPP_INFO(node->get_logger(), "PDO log: %s", log_path.c_str());
 
     // Encoder resolution — read from topology config; defaults live in SlaveConfig::Scaling.
@@ -601,6 +615,7 @@ int main(int argc, char** argv) {
                 log_path = make_run_csv_path(node->get_logger(), sname);
                 csv_file.open(log_path);
                 csv_file << dyno::PDO_LOG_CSV_HEADER << '\n';
+                chown_to_sudo_user(log_path);
                 RCLCPP_INFO(node->get_logger(), "PDO log rotated: %s", log_path.c_str());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));

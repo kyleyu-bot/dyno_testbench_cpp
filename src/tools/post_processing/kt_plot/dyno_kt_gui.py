@@ -73,6 +73,10 @@ def _validate_kt_data(data: np.ndarray, header: list[str], drive: str) -> None:
         )
 
 
+def _is_2way_test(csv_path: Path) -> bool:
+    return "torque_ramp_2way" in csv_path.parent.name
+
+
 def _detect_ramp_segment(
     data: np.ndarray, header: list[str], drive: str, torque_sensor_col: str
 ) -> tuple[np.ndarray, np.ndarray, float]:
@@ -98,6 +102,42 @@ def _detect_ramp_segment(
     seg_iq      = iq[t0_idx : t1_idx + 1]
     seg_torque  = torque_sns[t0_idx : t1_idx + 1]
     return seg_iq, seg_torque, float(gear_ratio)
+
+
+def _detect_2way_segments(
+    data: np.ndarray, header: list[str], drive: str, torque_sensor_col: str
+) -> tuple[tuple, tuple, tuple, float]:
+    """Return ((iq1,tor1), (iq2,tor2), (iq3,tor3), gear_ratio) for each ramp leg."""
+    torque_cmd_col, iq_col, gear_col = _DRIVE_COLS[drive]
+
+    torque_cmd = data[:, header.index(torque_cmd_col)]
+    iq         = data[:, header.index(iq_col)]
+    torque_sns = data[:, header.index(torque_sensor_col)]
+    gear_ratio = data[0, header.index(gear_col)] if gear_col in header else 1.0
+
+    initial = torque_cmd[0]
+
+    # t0: one row before first deviation from initial
+    dev = np.where(np.abs(torque_cmd - initial) > _DEVIATION_THRESHOLD)[0]
+    if len(dev) == 0:
+        raise ValueError("No torque deviation found.")
+    t0_idx = max(0, dev[0] - 1)
+
+    # t1: positive peak (end of leg 1 / start of leg 2)
+    t1_idx = int(np.argmax(torque_cmd))
+
+    # t2: negative peak after t1 (end of leg 2 / start of leg 3)
+    t2_idx = int(np.argmin(torque_cmd[t1_idx:])) + t1_idx
+
+    # t3: first index after t2 where torque_cmd is back within threshold of initial
+    after_t2 = torque_cmd[t2_idx:]
+    returned = np.where(np.abs(after_t2 - initial) < _DEVIATION_THRESHOLD)[0]
+    t3_idx = int(returned[0]) + t2_idx if len(returned) > 0 else len(torque_cmd) - 1
+
+    leg1 = (iq[t0_idx : t1_idx + 1], torque_sns[t0_idx : t1_idx + 1])
+    leg2 = (iq[t1_idx : t2_idx + 1], torque_sns[t1_idx : t2_idx + 1])
+    leg3 = (iq[t2_idx : t3_idx + 1], torque_sns[t2_idx : t3_idx + 1])
+    return leg1, leg2, leg3, float(gear_ratio)
 
 
 def _linear_fit(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float]:
@@ -198,60 +238,115 @@ class DynoKtApp(tk.Tk):
             messagebox.showerror("Column missing", f"Column '{sensor_col}' not in CSV.")
             return
 
+        two_way = _is_2way_test(csv_path)
+
         try:
-            iq, torque, gear_ratio = _detect_ramp_segment(
-                data, header, drive, sensor_col)
+            if two_way:
+                leg1, leg2, leg3, gear_ratio = _detect_2way_segments(
+                    data, header, drive, sensor_col)
+            else:
+                iq, torque, gear_ratio = _detect_ramp_segment(
+                    data, header, drive, sensor_col)
+                leg1 = (iq, torque)
         except Exception as exc:
             messagebox.showerror("Segment detection failed", str(exc))
             return
 
-        if self.invert_var.get():
-            torque = -torque
+        invert = self.invert_var.get()
 
-        kt_out, ic_out, r2_out = _linear_fit(iq, torque)
-        kt_mot, ic_mot, r2_mot = _linear_fit(iq, torque / gear_ratio)
+        def _fits(iq, torque):
+            if invert:
+                torque = -torque
+            return torque, _linear_fit(iq, torque), _linear_fit(iq, torque / gear_ratio)
+
+        tor1, fit1_out, fit1_mot = _fits(*leg1)
+        extra_legs = None
+        if two_way:
+            tor2, fit2_out, fit2_mot = _fits(*leg2)
+            tor3, fit3_out, fit3_mot = _fits(*leg3)
+            extra_legs = (
+                (leg2[0], tor2, fit2_out, fit2_mot),
+                (leg3[0], tor3, fit3_out, fit3_mot),
+            )
+
+        # Full time-series for the raw data plots
+        _, iq_col, _ = _DRIVE_COLS[drive]
+        t_s = (data[:, header.index("stamp_ns")] - data[0, header.index("stamp_ns")]) * 1e-9
+        full_iq     = data[:, header.index(iq_col)]
+        full_torque = data[:, header.index(sensor_col)]
+        if invert:
+            full_torque = -full_torque
 
         self._csv_path = csv_path
-        self._draw(iq, torque, gear_ratio,
-                   kt_out, ic_out, r2_out,
-                   kt_mot, ic_mot, r2_mot,
-                   sensor_col)
+        self._draw(leg1[0], tor1, gear_ratio,
+                   fit1_out, fit1_mot, sensor_col, extra_legs,
+                   t_s, full_iq, full_torque)
         self.status_var.set(
-            f"Kt_output = {kt_out:.4f} Nm/A  |  "
-            f"Kt_motor = {kt_mot:.4f} Nm/A  (gear ratio: {gear_ratio:.4f})"
+            f"Leg 1 — Kt_output = {fit1_out[0]:.4f} Nm/A  |  "
+            f"Kt_motor = {fit1_mot[0]:.4f} Nm/A  (gear ratio: {gear_ratio:.4f})"
+            + (f"  |  Leg 2 Kt = {fit2_out[0]:.4f}  |  Leg 3 Kt = {fit3_out[0]:.4f}"
+               if two_way else "")
         )
 
-    def _draw(self, iq, torque, gear_ratio,
-              kt_out, ic_out, r2_out,
-              kt_mot, ic_mot, r2_mot,
-              sensor_col):
+    def _draw(self, iq1, tor1, gear_ratio,
+              fit1_out, fit1_mot, sensor_col, extra_legs,
+              t_s, full_iq, full_torque):
         if self._canvas is not None:
             self._canvas.get_tk_widget().destroy()
         if self._toolbar is not None:
             self._toolbar.destroy()
 
-        fig = Figure(figsize=(12, 5), tight_layout=True)
-        iq_fit = np.linspace(iq.min(), iq.max(), 200)
+        n_fit_rows = 1 if extra_legs is None else 3
+        n_rows = n_fit_rows + 1          # +1 for the time-series row at the top
+        fig = Figure(figsize=(12, 5 * n_rows), tight_layout=True)
 
-        ax1 = fig.add_subplot(1, 2, 1)
-        ax1.scatter(iq, torque, s=4, alpha=0.5, label="data")
-        ax1.plot(iq_fit, kt_out * iq_fit + ic_out, "r-",
-                 label=f"fit: Kt = {kt_out:.4f} Nm/A\nR² = {r2_out:.4f}")
-        ax1.set_xlabel("Iq actual (A)")
-        ax1.set_ylabel(f"{sensor_col} (Nm)")
-        ax1.set_title("Output shaft Kt")
-        ax1.legend(fontsize=9)
-        ax1.grid(True, alpha=0.3)
+        # ── Row 0: raw time-series ────────────────────────────────────────────
+        ax_iq = fig.add_subplot(n_rows, 2, 1)
+        ax_iq.plot(t_s, full_iq, linewidth=0.8)
+        ax_iq.set_xlabel("Time (s)")
+        ax_iq.set_ylabel("Iq actual (A)")
+        ax_iq.set_title("Iq actual — full run")
+        ax_iq.grid(True, alpha=0.3)
 
-        ax2 = fig.add_subplot(1, 2, 2)
-        ax2.scatter(iq, torque / gear_ratio, s=4, alpha=0.5, label="data")
-        ax2.plot(iq_fit, kt_mot * iq_fit + ic_mot, "r-",
-                 label=f"fit: Kt = {kt_mot:.4f} Nm/A\nR² = {r2_mot:.4f}")
-        ax2.set_xlabel("Iq actual (A)")
-        ax2.set_ylabel(f"{sensor_col} / gear_ratio (Nm)")
-        ax2.set_title(f"Motor shaft Kt  (gear ratio: {gear_ratio:.4f})")
-        ax2.legend(fontsize=9)
-        ax2.grid(True, alpha=0.3)
+        ax_tor = fig.add_subplot(n_rows, 2, 2)
+        ax_tor.plot(t_s, full_torque, linewidth=0.8, color="tab:orange")
+        ax_tor.set_xlabel("Time (s)")
+        ax_tor.set_ylabel(f"{sensor_col} (Nm)")
+        ax_tor.set_title(f"{sensor_col} — full run")
+        ax_tor.grid(True, alpha=0.3)
+
+        leg_labels = ["Leg 1 (+ ramp)", "Leg 2 (+ → −)", "Leg 3 (− return)"]
+        legs = [(iq1, tor1, fit1_out, fit1_mot)]
+        if extra_legs is not None:
+            legs += list(extra_legs)
+
+        for row, (iq, tor, fit_out, fit_mot) in enumerate(legs):
+            kt_out, ic_out, r2_out = fit_out
+            kt_mot, ic_mot, r2_mot = fit_mot
+            iq_fit = np.linspace(iq.min(), iq.max(), 200)
+            label  = leg_labels[row]
+            # +1 row offset because row 0 is the time-series plots
+            base = (row + 1) * 2 + 1
+
+            ax_out = fig.add_subplot(n_rows, 2, base)
+            ax_out.scatter(iq, tor, s=4, alpha=0.5, label="data")
+            ax_out.plot(iq_fit, kt_out * iq_fit + ic_out, "r-",
+                        label=f"fit: Kt = {kt_out:.4f} Nm/A\nR² = {r2_out:.4f}")
+            ax_out.set_xlabel("Iq actual (A)")
+            ax_out.set_ylabel(f"{sensor_col} (Nm)")
+            ax_out.set_title(f"{label} — Output shaft Kt")
+            ax_out.legend(fontsize=9)
+            ax_out.grid(True, alpha=0.3)
+
+            ax_mot = fig.add_subplot(n_rows, 2, base + 1)
+            ax_mot.scatter(iq, tor / gear_ratio, s=4, alpha=0.5, label="data")
+            ax_mot.plot(iq_fit, kt_mot * iq_fit + ic_mot, "r-",
+                        label=f"fit: Kt = {kt_mot:.4f} Nm/A\nR² = {r2_mot:.4f}")
+            ax_mot.set_xlabel("Iq actual (A)")
+            ax_mot.set_ylabel(f"{sensor_col} / gear_ratio (Nm)")
+            ax_mot.set_title(f"{label} — Motor shaft Kt  (GR: {gear_ratio:.4f})")
+            ax_mot.legend(fontsize=9)
+            ax_mot.grid(True, alpha=0.3)
 
         self._fig = fig
         self._canvas = FigureCanvasTkAgg(fig, master=self._plot_frame)
@@ -260,6 +355,18 @@ class DynoKtApp(tk.Tk):
         self._toolbar = NavigationToolbar2Tk(self._canvas, self._plot_frame)
         self._toolbar.update()
         self._save_btn.configure(state="normal")
+
+        def _on_scroll(event):
+            if event.inaxes is None:
+                return
+            ax = event.inaxes
+            factor = 1.15 if event.button == "down" else (1 / 1.15)
+            xdata, ydata = event.xdata, event.ydata
+            ax.set_xlim([xdata + (x - xdata) * factor for x in ax.get_xlim()])
+            ax.set_ylim([ydata + (y - ydata) * factor for y in ax.get_ylim()])
+            self._canvas.draw_idle()
+
+        self._canvas.mpl_connect("scroll_event", _on_scroll)
 
     def _save(self):
         if self._fig is None:
