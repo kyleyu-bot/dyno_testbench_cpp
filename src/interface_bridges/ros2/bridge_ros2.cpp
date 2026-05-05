@@ -393,10 +393,15 @@ private:
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-/// Chown path to SUDO_USER if the process was launched via sudo.
+/// Chown path to the original unprivileged user.
+/// Prefers DYNO_ORIGINAL_USER (set by dyno_gui.py before the nested sudo -E
+/// that launches this process) because sudo always overwrites SUDO_USER with
+/// the user who ran *that* sudo invocation — which is root when the GUI
+/// (already root) re-invokes sudo to start the bridge.
 static void chown_to_sudo_user(const std::string& path)
 {
-    const char* sudo_user = std::getenv("SUDO_USER");
+    const char* sudo_user = std::getenv("DYNO_ORIGINAL_USER");
+    if (!sudo_user || !*sudo_user) sudo_user = std::getenv("SUDO_USER");
     if (!sudo_user || !*sudo_user) return;
     const struct passwd* pw = getpwnam(sudo_user);
     if (!pw) return;

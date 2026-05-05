@@ -2668,7 +2668,14 @@ def launch_bridge(bridge_path: str, topology: str, fault_reset_s: float,
     if debug:
         cmd += ["-p", "debug:=1"]
     print(f"[dyno_gui] Launching: {' '.join(cmd)}")
-    proc = subprocess.Popen(cmd)
+    # sudo -E overwrites SUDO_USER with the invoking user (root here, since the
+    # GUI itself runs as root via sudo).  Preserve the original user in a custom
+    # variable that sudo does not touch, so chown_to_sudo_user() in the bridge
+    # can find the real unprivileged user.
+    env = os.environ.copy()
+    if "SUDO_USER" in env:
+        env.setdefault("DYNO_ORIGINAL_USER", env["SUDO_USER"])
+    proc = subprocess.Popen(cmd, env=env)
     return proc
 
 

@@ -107,7 +107,7 @@ def _detect_ramp_segment(
 def _detect_2way_segments(
     data: np.ndarray, header: list[str], drive: str, torque_sensor_col: str
 ) -> tuple[tuple, tuple, tuple, float]:
-    """Return ((iq1,tor1), (iq2,tor2), (iq3,tor3), gear_ratio) for each ramp leg."""
+    """Return ((iq1,tor1), (iq2,tor2), (iq3,tor3), gear_ratio) for each ramp segment."""
     torque_cmd_col, iq_col, gear_col = _DRIVE_COLS[drive]
 
     torque_cmd = data[:, header.index(torque_cmd_col)]
@@ -123,10 +123,10 @@ def _detect_2way_segments(
         raise ValueError("No torque deviation found.")
     t0_idx = max(0, dev[0] - 1)
 
-    # t1: positive peak (end of leg 1 / start of leg 2)
+    # t1: positive peak (end of seg 1 / start of seg 2)
     t1_idx = int(np.argmax(torque_cmd))
 
-    # t2: negative peak after t1 (end of leg 2 / start of leg 3)
+    # t2: negative peak after t1 (end of seg 2 / start of seg 3)
     t2_idx = int(np.argmin(torque_cmd[t1_idx:])) + t1_idx
 
     # t3: first index after t2 where torque_cmd is back within threshold of initial
@@ -134,10 +134,10 @@ def _detect_2way_segments(
     returned = np.where(np.abs(after_t2 - initial) < _DEVIATION_THRESHOLD)[0]
     t3_idx = int(returned[0]) + t2_idx if len(returned) > 0 else len(torque_cmd) - 1
 
-    leg1 = (iq[t0_idx : t1_idx + 1], torque_sns[t0_idx : t1_idx + 1])
-    leg2 = (iq[t1_idx : t2_idx + 1], torque_sns[t1_idx : t2_idx + 1])
-    leg3 = (iq[t2_idx : t3_idx + 1], torque_sns[t2_idx : t3_idx + 1])
-    return leg1, leg2, leg3, float(gear_ratio)
+    seg1 = (iq[t0_idx : t1_idx + 1], torque_sns[t0_idx : t1_idx + 1])
+    seg2 = (iq[t1_idx : t2_idx + 1], torque_sns[t1_idx : t2_idx + 1])
+    seg3 = (iq[t2_idx : t3_idx + 1], torque_sns[t2_idx : t3_idx + 1])
+    return seg1, seg2, seg3, float(gear_ratio)
 
 
 def _linear_fit(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float]:
@@ -160,6 +160,7 @@ class DynoKtApp(tk.Tk):
         self._canvas = None
         self._toolbar = None
         self._csv_path: Path | None = None
+        self._axes_info: list[tuple] = []   # (ax, filename_stem)
         self._build_controls()
         self._plot_frame = ttk.LabelFrame(self, text="Preview", padding=4)
         self._plot_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -242,12 +243,12 @@ class DynoKtApp(tk.Tk):
 
         try:
             if two_way:
-                leg1, leg2, leg3, gear_ratio = _detect_2way_segments(
+                seg1, seg2, seg3, gear_ratio = _detect_2way_segments(
                     data, header, drive, sensor_col)
             else:
                 iq, torque, gear_ratio = _detect_ramp_segment(
                     data, header, drive, sensor_col)
-                leg1 = (iq, torque)
+                seg1 = (iq, torque)
         except Exception as exc:
             messagebox.showerror("Segment detection failed", str(exc))
             return
@@ -259,14 +260,14 @@ class DynoKtApp(tk.Tk):
                 torque = -torque
             return torque, _linear_fit(iq, torque), _linear_fit(iq, torque / gear_ratio)
 
-        tor1, fit1_out, fit1_mot = _fits(*leg1)
+        tor1, fit1_out, fit1_mot = _fits(*seg1)
         extra_legs = None
         if two_way:
-            tor2, fit2_out, fit2_mot = _fits(*leg2)
-            tor3, fit3_out, fit3_mot = _fits(*leg3)
+            tor2, fit2_out, fit2_mot = _fits(*seg2)
+            tor3, fit3_out, fit3_mot = _fits(*seg3)
             extra_legs = (
-                (leg2[0], tor2, fit2_out, fit2_mot),
-                (leg3[0], tor3, fit3_out, fit3_mot),
+                (seg2[0], tor2, fit2_out, fit2_mot),
+                (seg3[0], tor3, fit3_out, fit3_mot),
             )
 
         # Full time-series for the raw data plots
@@ -278,13 +279,13 @@ class DynoKtApp(tk.Tk):
             full_torque = -full_torque
 
         self._csv_path = csv_path
-        self._draw(leg1[0], tor1, gear_ratio,
+        self._draw(seg1[0], tor1, gear_ratio,
                    fit1_out, fit1_mot, sensor_col, extra_legs,
                    t_s, full_iq, full_torque)
         self.status_var.set(
-            f"Leg 1 — Kt_output = {fit1_out[0]:.4f} Nm/A  |  "
+            f"Seg 1 — Kt_output = {fit1_out[0]:.4f} Nm/A  |  "
             f"Kt_motor = {fit1_mot[0]:.4f} Nm/A  (gear ratio: {gear_ratio:.4f})"
-            + (f"  |  Leg 2 Kt = {fit2_out[0]:.4f}  |  Leg 3 Kt = {fit3_out[0]:.4f}"
+            + (f"  |  Seg 2 Kt = {fit2_out[0]:.4f}  |  Seg 3 Kt = {fit3_out[0]:.4f}"
                if two_way else "")
         )
 
@@ -300,6 +301,8 @@ class DynoKtApp(tk.Tk):
         n_rows = n_fit_rows + 1          # +1 for the time-series row at the top
         fig = Figure(figsize=(12, 5 * n_rows), tight_layout=True)
 
+        axes_info = []
+
         # ── Row 0: raw time-series ────────────────────────────────────────────
         ax_iq = fig.add_subplot(n_rows, 2, 1)
         ax_iq.plot(t_s, full_iq, linewidth=0.8)
@@ -307,6 +310,7 @@ class DynoKtApp(tk.Tk):
         ax_iq.set_ylabel("Iq actual (A)")
         ax_iq.set_title("Iq actual — full run")
         ax_iq.grid(True, alpha=0.3)
+        axes_info.append((ax_iq, "iq_vs_time"))
 
         ax_tor = fig.add_subplot(n_rows, 2, 2)
         ax_tor.plot(t_s, full_torque, linewidth=0.8, color="tab:orange")
@@ -314,8 +318,10 @@ class DynoKtApp(tk.Tk):
         ax_tor.set_ylabel(f"{sensor_col} (Nm)")
         ax_tor.set_title(f"{sensor_col} — full run")
         ax_tor.grid(True, alpha=0.3)
+        axes_info.append((ax_tor, "torque_vs_time"))
 
-        leg_labels = ["Leg 1 (+ ramp)", "Leg 2 (+ → −)", "Leg 3 (− return)"]
+        leg_labels = ["Seg 1 (+ ramp)", "Seg 2 (+ → −)", "Seg 3 (− return)"]
+        leg_stems  = ["seg1_pos_ramp",  "seg2_sweep",     "seg3_neg_return"]
         legs = [(iq1, tor1, fit1_out, fit1_mot)]
         if extra_legs is not None:
             legs += list(extra_legs)
@@ -325,6 +331,7 @@ class DynoKtApp(tk.Tk):
             kt_mot, ic_mot, r2_mot = fit_mot
             iq_fit = np.linspace(iq.min(), iq.max(), 200)
             label  = leg_labels[row]
+            stem   = leg_stems[row]
             # +1 row offset because row 0 is the time-series plots
             base = (row + 1) * 2 + 1
 
@@ -337,6 +344,7 @@ class DynoKtApp(tk.Tk):
             ax_out.set_title(f"{label} — Output shaft Kt")
             ax_out.legend(fontsize=9)
             ax_out.grid(True, alpha=0.3)
+            axes_info.append((ax_out, f"{stem}_output_kt"))
 
             ax_mot = fig.add_subplot(n_rows, 2, base + 1)
             ax_mot.scatter(iq, tor / gear_ratio, s=4, alpha=0.5, label="data")
@@ -347,8 +355,10 @@ class DynoKtApp(tk.Tk):
             ax_mot.set_title(f"{label} — Motor shaft Kt  (GR: {gear_ratio:.4f})")
             ax_mot.legend(fontsize=9)
             ax_mot.grid(True, alpha=0.3)
+            axes_info.append((ax_mot, f"{stem}_motor_kt"))
 
         self._fig = fig
+        self._axes_info = axes_info
         self._canvas = FigureCanvasTkAgg(fig, master=self._plot_frame)
         self._canvas.draw()
         self._canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -369,21 +379,22 @@ class DynoKtApp(tk.Tk):
         self._canvas.mpl_connect("scroll_event", _on_scroll)
 
     def _save(self):
-        if self._fig is None:
+        if self._fig is None or not self._axes_info:
             return
         default_dir = str(self._csv_path.parent) if self._csv_path else "."
-        path = filedialog.asksaveasfilename(
-            title="Save Kt Plot",
-            initialdir=default_dir,
-            initialfile="kt_plot.png",
-            defaultextension=".png",
-            filetypes=(("PNG", "*.png"), ("All files", "*")),
-        )
-        if not path:
+        save_dir = filedialog.askdirectory(
+            title="Select folder to save plots", initialdir=default_dir)
+        if not save_dir:
             return
+        renderer = self._fig.canvas.get_renderer()
         try:
-            self._fig.savefig(path, dpi=150, bbox_inches="tight")
-            self.status_var.set(f"Saved {path}")
+            for ax, stem in self._axes_info:
+                path = os.path.join(save_dir, f"kt_{stem}.png")
+                bbox = ax.get_tightbbox(renderer).transformed(
+                    self._fig.dpi_scale_trans.inverted())
+                self._fig.savefig(path, dpi=150, bbox_inches=bbox)
+            self.status_var.set(
+                f"Saved {len(self._axes_info)} plots to {save_dir}")
         except Exception as exc:
             messagebox.showerror("Save failed", str(exc))
 
