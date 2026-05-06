@@ -1276,6 +1276,13 @@ class ScriptingPanel(QGroupBox):
         btn_row.addWidget(self._run_btn)
         btn_row.addWidget(self._abort_btn)
 
+        # ── Actuator serial number ────────────────────────────────────────────
+        self._serial_number_edit = QLineEdit()
+        self._serial_number_edit.setPlaceholderText("Enter serial number…")
+        sn_row = QHBoxLayout()
+        sn_row.addWidget(QLabel("Actuator S/N:"))
+        sn_row.addWidget(self._serial_number_edit)
+
         # ── Output log ────────────────────────────────────────────────────────
         self._log = QTextEdit()
         self._log.setReadOnly(True)
@@ -1290,6 +1297,7 @@ class ScriptingPanel(QGroupBox):
         lay.addWidget(self._params_scroll)
         lay.addLayout(timing_row)
         lay.addLayout(btn_row)
+        lay.addLayout(sn_row)
         lay.addWidget(QLabel("Output:"))
         lay.addWidget(self._log, 1)
 
@@ -1365,6 +1373,46 @@ class ScriptingPanel(QGroupBox):
                 result[name] = w.value()
         return result
 
+    # ── Serial number file ────────────────────────────────────────────────────
+
+    def _write_sn_file(self, script_stem: str, sn: str):
+        """Write actuator_serial_number.txt into the test log directory.
+
+        The bridge creates the directory asynchronously after pulse_save_log(),
+        so we retry every 200 ms until it appears (up to ~3 s total).
+        """
+        if not sn:
+            return
+        import glob, datetime, re, pwd as _pwd
+        repo_root  = os.path.abspath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.."))
+        date_str   = datetime.date.today().strftime("%Y-%m-%d")
+        safe_stem  = re.sub(r"[^a-zA-Z0-9]+", "_", script_stem).rstrip("_")
+        pattern    = os.path.join(repo_root, "test_data_log", date_str,
+                                  f"*_{safe_stem}")
+        attempts   = [0]
+
+        def _try_write():
+            dirs = sorted(glob.glob(pattern))
+            if not dirs:
+                attempts[0] += 1
+                if attempts[0] < 15:   # give up after ~3 s
+                    QTimer.singleShot(200, _try_write)
+                return
+            path = os.path.join(dirs[-1], "actuator_serial_number.txt")
+            try:
+                with open(path, "w") as f:
+                    f.write(f'actuator_serial_number = "{sn}"\n')
+                sudo_user = (os.environ.get("DYNO_ORIGINAL_USER")
+                             or os.environ.get("SUDO_USER", ""))
+                if sudo_user and sudo_user != "root":
+                    pw = _pwd.getpwnam(sudo_user)
+                    os.chown(path, pw.pw_uid, pw.pw_gid)
+            except Exception as exc:
+                print(f"[TestScriptPanel] serial number file write failed: {exc}")
+
+        QTimer.singleShot(300, _try_write)
+
     # ── Run / abort ───────────────────────────────────────────────────────────
 
     def _run_script(self):
@@ -1386,6 +1434,7 @@ class ScriptingPanel(QGroupBox):
         script_stem = os.path.splitext(self._script_combo.currentText())[0]
         self._commander.set_script_name(script_stem)
         self._commander.pulse_save_log()
+        self._write_sn_file(script_stem, self._serial_number_edit.text().strip())
 
         params = self._collect_params()
         self._log.clear()
@@ -1452,6 +1501,46 @@ class ScriptingPanel(QGroupBox):
             # QTimer.singleShot from a background thread is not reliable.
             self._commander.set_script_name("")
             self._commander.pulse_save_log()
+            threading.Thread(target=self._convert_recent_logs, daemon=True).start()
+
+    def _convert_recent_logs(self) -> None:
+        """Convert recently-closed .csv.gz logs to Parquet for fast column access."""
+        import time, pwd as _pwd
+        from pathlib import Path
+        time.sleep(5)   # wait for bridge drain thread to close and flush the file
+        try:
+            import pandas as pd
+            import pyarrow  # noqa: F401
+        except ImportError as exc:
+            self._log_line(f"[Parquet] Skipped (pip install pyarrow): {exc}")
+            return
+        repo_root = os.path.abspath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.."))
+        log_root  = Path(repo_root) / "test_data_log"
+        cutoff    = time.time() - 120   # only files closed in the last 2 minutes
+        sudo_user = (os.environ.get("DYNO_ORIGINAL_USER")
+                     or os.environ.get("SUDO_USER", ""))
+        for gz in sorted(log_root.glob("*/*/*.csv.gz")):
+            pq_path = gz.parent / "dyno_pdo.parquet"
+            try:
+                mtime = gz.stat().st_mtime
+            except OSError:
+                continue
+            if pq_path.exists() or mtime <= cutoff:
+                continue
+            try:
+                self._log_line(f"[Parquet] Converting {gz.parent.name}…")
+                df = pd.read_csv(str(gz))
+                df.to_parquet(str(pq_path), index=False, compression="snappy")
+                if sudo_user and sudo_user != "root":
+                    try:
+                        pw = _pwd.getpwnam(sudo_user)
+                        os.chown(str(pq_path), pw.pw_uid, pw.pw_gid)
+                    except Exception:
+                        pass
+                self._log_line("[Parquet] Done")
+            except Exception as exc:
+                self._log_line(f"[Parquet] Error: {exc}")
 
     def _on_script_done(self, success: bool, msg: str):
         """Log result message — UI state and log rotation handled by _poll_thread_done."""

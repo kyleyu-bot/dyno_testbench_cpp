@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import csv
+import gzip
+import io
 
 import numpy as np
 
@@ -134,31 +136,43 @@ def resolve_csv_path(path: str | Path) -> Path:
     if p.is_file():
         return p
     if p.is_dir():
-        direct = p / "dyno_pdo.csv"
-        if direct.is_file():
-            return direct
-        matches = sorted(p.glob("**/dyno_pdo.csv"))
-        if matches:
-            return matches[-1]
-    raise FileNotFoundError(f"No dyno_pdo.csv found at {p}")
+        for name in ("dyno_pdo.csv.gz", "dyno_pdo.csv"):
+            if (p / name).is_file():
+                return p / name
+        all_gz  = sorted(p.glob("**/dyno_pdo.csv.gz"))
+        all_csv = sorted(p.glob("**/dyno_pdo.csv"))
+        candidates = all_gz + all_csv
+        if candidates:
+            return max(candidates, key=lambda x: x.stat().st_mtime)
+    raise FileNotFoundError(f"No dyno_pdo.csv(.gz) found at {p}")
 
 
 def latest_log(root: str | Path = "test_data_log") -> Path:
-    matches = sorted(Path(root).expanduser().glob("**/dyno_pdo.csv"))
+    base = Path(root).expanduser()
+    all_gz  = list(base.glob("**/dyno_pdo.csv.gz"))
+    all_csv = list(base.glob("**/dyno_pdo.csv"))
+    matches = all_gz + all_csv
     if not matches:
-        raise FileNotFoundError(f"No dyno_pdo.csv files found under {root}")
-    return matches[-1]
+        raise FileNotFoundError(f"No dyno_pdo.csv(.gz) files found under {root}")
+    return max(matches, key=lambda x: x.stat().st_mtime)
+
+
+def _open_csv(csv_path: Path):
+    """Return a text-mode file handle for either .csv or .csv.gz."""
+    if csv_path.suffix == ".gz":
+        return io.TextIOWrapper(gzip.open(csv_path, "rb"), newline="")
+    return csv_path.open(newline="")
 
 
 def read_csv_header(path: str | Path) -> list[str]:
     csv_path = resolve_csv_path(path)
-    with csv_path.open(newline="") as fh:
+    with _open_csv(csv_path) as fh:
         return next(csv.reader(fh), [])
 
 
 def read_csv_columns(path: str | Path) -> dict[str, np.ndarray]:
     csv_path = resolve_csv_path(path)
-    with csv_path.open(newline="") as fh:
+    with _open_csv(csv_path) as fh:
         reader = csv.DictReader(fh)
         columns = {name: [] for name in reader.fieldnames or []}
         for row in reader:

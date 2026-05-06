@@ -6,18 +6,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/dyno_matplotlib")
 
-if os.environ.get("PYTHONNOUSERSITE") != "1" and os.environ.get("DYNO_KT_ALLOW_USER_SITE") != "1":
-    env = os.environ.copy()
-    env["PYTHONNOUSERSITE"] = "1"
-    os.execvpe(sys.executable, [sys.executable, *sys.argv], env)
-
 import numpy as np
+import pandas as pd
 import matplotlib
 matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -34,27 +29,26 @@ _DRIVE_COLS = {
 
 def _find_csv(folder: str) -> Path:
     p = Path(folder)
-    csv = p / "dyno_pdo.csv"
-    if csv.exists():
-        return csv
-    # also accept if the user selects the CSV file directly
-    if p.suffix == ".csv" and p.exists():
+    for name in ("dyno_pdo.csv.gz", "dyno_pdo.csv"):
+        if (p / name).exists():
+            return p / name
+    if p.suffix in (".csv", ".gz") and p.exists():
         return p
-    raise FileNotFoundError(f"No dyno_pdo.csv found in {folder}")
+    raise FileNotFoundError(f"No dyno_pdo.csv(.gz) found in {folder}")
 
 
 def _latest_log(root: str = "test_data_log") -> Path:
     base = Path(root)
-    csvs = sorted(base.glob("*/*/dyno_pdo.csv"))
+    csvs = list(base.glob("*/*/dyno_pdo.csv.gz")) + list(base.glob("*/*/dyno_pdo.csv"))
     if not csvs:
-        raise FileNotFoundError(f"No dyno_pdo.csv found under {root}")
-    return csvs[-1].parent
+        raise FileNotFoundError(f"No dyno_pdo.csv(.gz) found under {root}")
+    return max(csvs, key=lambda p: p.stat().st_mtime).parent
 
 
 def _load_csv(csv_path: Path) -> tuple[np.ndarray, list[str]]:
-    with csv_path.open() as f:
-        header = f.readline().strip().split(",")
-    data = np.loadtxt(csv_path, delimiter=",", skiprows=1)
+    df_raw = pd.read_csv(csv_path)
+    header = list(df_raw.columns)
+    data   = df_raw.to_numpy(dtype=float)
     return data, header
 
 

@@ -54,6 +54,8 @@ extern "C" {
 
 #include <nlohmann/json.hpp>
 
+#include <zlib.h>
+
 #include <algorithm>
 #include <fstream>
 #include <cmath>
@@ -433,7 +435,7 @@ static std::string make_run_csv_path(rclcpp::Logger logger,
     }
     chown_to_sudo_user(std::string("test_data_log/") + date_buf);
     chown_to_sudo_user(run_dir);
-    return run_dir + "/dyno_pdo.csv";
+    return run_dir + "/dyno_pdo.csv.gz";
 }
 
 int main(int argc, char** argv) {
@@ -560,9 +562,10 @@ int main(int argc, char** argv) {
     EthercatLoop loop(*rt, cfg.cycle_hz, rt_cfg);
 
     // ── CSV logging setup ─────────────────────────────────────────────────────
-    std::string   log_path = make_run_csv_path(node->get_logger());
-    std::ofstream csv_file(log_path);
-    csv_file << dyno::PDO_LOG_CSV_HEADER << '\n';
+    std::string log_path = make_run_csv_path(node->get_logger());
+    gzFile csv_gz = gzopen(log_path.c_str(), "wb1");
+    gzwrite(csv_gz, dyno::PDO_LOG_CSV_HEADER, static_cast<unsigned>(strlen(dyno::PDO_LOG_CSV_HEADER)));
+    gzwrite(csv_gz, "\n", 1);
     chown_to_sudo_user(log_path);
     RCLCPP_INFO(node->get_logger(), "PDO log: %s", log_path.c_str());
 
@@ -610,22 +613,24 @@ int main(int argc, char** argv) {
     std::thread log_drain([&]() {
         while (!g_shutdown.load() || !log_buf.empty()) {
             while (auto rec = log_buf.pop()) {
-                csv_file << DualNovantaTestbench::serializeToCsvRow(*rec) << '\n';
+                std::string row = DualNovantaTestbench::serializeToCsvRow(*rec) + '\n';
+                gzwrite(csv_gz, row.c_str(), static_cast<unsigned>(row.size()));
             }
             if (g_rotate_log.exchange(false)) {
-                csv_file.flush();
-                csv_file.close();
+                gzflush(csv_gz, Z_SYNC_FLUSH);
+                gzclose(csv_gz);
                 std::string sname;
                 { std::lock_guard<std::mutex> lk(g_script_name_mtx); sname = g_script_name; }
                 log_path = make_run_csv_path(node->get_logger(), sname);
-                csv_file.open(log_path);
-                csv_file << dyno::PDO_LOG_CSV_HEADER << '\n';
+                csv_gz = gzopen(log_path.c_str(), "wb1");
+                gzwrite(csv_gz, dyno::PDO_LOG_CSV_HEADER, static_cast<unsigned>(strlen(dyno::PDO_LOG_CSV_HEADER)));
+                gzwrite(csv_gz, "\n", 1);
                 chown_to_sudo_user(log_path);
                 RCLCPP_INFO(node->get_logger(), "PDO log rotated: %s", log_path.c_str());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        csv_file.close();
+        gzclose(csv_gz);
     });
 
     // ── Register cycle callback — fires from RT thread at EtherCAT cycle rate ─

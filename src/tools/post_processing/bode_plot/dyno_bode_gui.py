@@ -5,16 +5,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/dyno_matplotlib")
-
-if os.environ.get("PYTHONNOUSERSITE") != "1" and os.environ.get("DYNO_BODE_ALLOW_USER_SITE") != "1":
-    env = os.environ.copy()
-    env["PYTHONNOUSERSITE"] = "1"
-    os.execvpe(sys.executable, [sys.executable, *sys.argv], env)
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -103,7 +97,7 @@ class DynoBodeApp(tk.Tk):
         ttk.Label(ctrl, textvariable=self.status_var, foreground="grey").grid(row=6, column=0, columnspan=4, sticky="w")
 
     def _browse(self):
-        path = filedialog.askopenfilename(title="Select dyno_pdo.csv", filetypes=(("CSV", "*.csv"), ("All files", "*")))
+        path = filedialog.askopenfilename(title="Select dyno_pdo.csv(.gz)", filetypes=(("CSV / GZ", "*.csv *.csv.gz"), ("All files", "*")))
         if path:
             self.path_var.set(path)
             self._load_columns()
